@@ -45,10 +45,19 @@ export default function Page() {
 
       for (let r = 0; r < raw.length; r++) {
         const rowStr = raw[r].map((c: any) => String(c ?? '').trim());
-        const nameIdx = rowStr.findIndex((c: string) => c === '품명' || c === 'ITEM' || c === '품 명' || c.includes('품명'));
+        const nameIdx = rowStr.findIndex((c: any) => {
+          if (!c) return false;
+          const str = String(c);
+          return str === '품명' || str === 'ITEM' || str === '품 명' || str.includes('품명');
+        });
+
         if (nameIdx !== -1) {
           headerRowIdx = r; nameCol = nameIdx;
-          colorCol = rowStr.findIndex((c: string) => c.includes('칼라') || c.includes('색상') || c.includes('COLOR'));
+          colorCol = rowStr.findIndex((c: any) => {
+            if (!c) return false;
+            const str = String(c);
+            return str.includes('칼라') || str.includes('색상') || str.includes('COLOR');
+          });
 
           // 1. 현재 행에서 사이즈 컬럼(숫자 또는 S/M/L) 찾기
           for (let c = nameIdx + 1; c < rowStr.length; c++) {
