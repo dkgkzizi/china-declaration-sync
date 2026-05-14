@@ -40,22 +40,22 @@ export default function Page() {
       const ws = wb.Sheets[wb.SheetNames[0]];
       const raw = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
 
-      let headerRowIdx = -1, nameCol = -1, colorCol = -1, sizeStartCol = -1;
-      let sizeLabels: string[] = [];
+      let headerRowIdx = -1, nameCol = -1, colorCol = -1;
+      let sizeCols: { col: number; label: string }[] = [];
 
       for (let r = 0; r < raw.length; r++) {
         const rowStr = raw[r].map((c: any) => String(c ?? '').trim());
         const nameIdx = rowStr.findIndex((c: any) => {
           if (!c) return false;
-          const str = String(c);
-          return str === '품명' || str === 'ITEM' || str === '품 명' || str.includes('품명');
+          const str = String(c).replace(/\s/g, '');
+          return str === '품명' || str === 'ITEM' || str.includes('품명');
         });
 
         if (nameIdx !== -1) {
           headerRowIdx = r; nameCol = nameIdx;
           colorCol = rowStr.findIndex((c: any) => {
             if (!c) return false;
-            const str = String(c);
+            const str = String(c).replace(/\s/g, '');
             return str.includes('칼라') || str.includes('색상') || str.includes('COLOR');
           });
 
@@ -63,24 +63,22 @@ export default function Page() {
           for (let c = nameIdx + 1; c < rowStr.length; c++) {
             const v = String(rowStr[c] ?? '').trim();
             if (!v) continue;
-            if (/^\d{2,3}$/.test(v) || ['S','M','L','XL','FREE'].includes(v.toUpperCase())) {
-              if (sizeStartCol === -1) sizeStartCol = c;
-              sizeLabels.push(v);
+            if (/^\d{2,3}$/.test(v) || ['S','M','L','XL','FREE', 'F'].includes(v.toUpperCase())) {
+              sizeCols.push({ col: c, label: v });
             }
           }
 
           // 2. 현재 행에서 사이즈를 못 찾았다면, 다음 행 확인 (2줄 병합 헤더인 경우)
-          if (sizeStartCol === -1 && r + 1 < raw.length) {
+          if (sizeCols.length === 0 && r + 1 < raw.length) {
             const nextRowStr = raw[r + 1].map((c: any) => String(c ?? '').trim());
             for (let c = 0; c < nextRowStr.length; c++) {
               const v = String(nextRowStr[c] ?? '').trim();
               if (!v) continue;
-              if (/^\d{2,3}$/.test(v) || ['S','M','L','XL','FREE'].includes(v.toUpperCase())) {
-                if (sizeStartCol === -1) sizeStartCol = c;
-                sizeLabels.push(v);
+              if (/^\d{2,3}$/.test(v) || ['S','M','L','XL','FREE', 'F'].includes(v.toUpperCase())) {
+                sizeCols.push({ col: c, label: v });
               }
             }
-            if (sizeStartCol !== -1) {
+            if (sizeCols.length > 0) {
               headerRowIdx = r + 1; // 데이터는 다음 행부터 시작
             }
           }
@@ -93,13 +91,18 @@ export default function Page() {
       const extracted: any[] = [];
       for (let r = headerRowIdx + 1; r < raw.length; r++) {
         const row = raw[r];
+        if (!row) continue;
         const name = String(row[nameCol] ?? '').trim();
         const color = colorCol >= 0 ? String(row[colorCol] ?? '').trim() : '';
-        if (!name || name === '합계') continue;
-        if (sizeStartCol !== -1 && sizeLabels.length > 0) {
-          sizeLabels.forEach((size, i) => {
-            const qty = parseInt(String(row[sizeStartCol + i] ?? '0').replace(/[^\d]/g, ''));
-            if (qty > 0) extracted.push({ style: name, color, size, qty });
+        if (!name || name === '합계' || name.includes('TOTAL')) continue;
+        
+        if (sizeCols.length > 0) {
+          sizeCols.forEach(({ col, label }) => {
+            const cellValue = String(row[col] ?? '0').replace(/[^\d]/g, '');
+            const qty = parseInt(cellValue || '0', 10);
+            if (qty > 0) {
+              extracted.push({ style: name, color, size: label, qty });
+            }
           });
         }
       }
