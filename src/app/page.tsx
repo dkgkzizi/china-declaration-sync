@@ -5,14 +5,13 @@ import {
   FileUp, 
   Download, 
   RefreshCcw, 
-  DollarSign, 
-  Ship, 
-  ShieldCheck,
-  Loader2,
-  CheckCircle2,
+  CheckCircle2, 
   AlertCircle,
   Database,
-  Globe
+  ArrowRightLeft,
+  Printer,
+  FileSpreadsheet,
+  PackageCheck
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import * as XLSX from 'xlsx'
@@ -28,10 +27,6 @@ interface PackingItem {
   color: string;
   size: string;
   qty: number;
-  unitPriceCNY: number;
-  landedCostKRW: number;
-  totalCostKRW: number;
-  originSheet?: string;
   isMatched?: boolean;
 }
 
@@ -39,9 +34,6 @@ export default function Home() {
   const [file, setFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
   const [items, setItems] = useState<PackingItem[]>([])
-  const [exchangeRate, setExchangeRate] = useState(190)
-  const [shippingCost, setShippingCost] = useState(500000)
-  const [customsRate, setCustomsRate] = useState(13)
   const [dbStatus, setDbStatus] = useState<'connected' | 'disconnected' | 'idle'>('idle')
   
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -52,30 +44,10 @@ export default function Home() {
         const { error } = await supabase.from('upload_logs').select('count', { count: 'exact', head: true });
         if (error) throw error;
         setDbStatus('connected');
-      } catch (err) {
-        setDbStatus('disconnected');
-      }
+      } catch (err) { setDbStatus('disconnected'); }
     };
     checkConn();
   }, []);
-
-  // Calculate Costs
-  useEffect(() => {
-    if (items.length === 0) return;
-    const totalQty = items.reduce((acc, item) => acc + item.qty, 0);
-    const shippingPerItem = totalQty > 0 ? shippingCost / totalQty : 0;
-    const updatedItems = items.map(item => {
-      const baseKRW = item.unitPriceCNY * exchangeRate;
-      const customs = baseKRW * (customsRate / 100);
-      const landed = baseKRW + customs + shippingPerItem;
-      return {
-        ...item,
-        landedCostKRW: Math.round(landed),
-        totalCostKRW: Math.round(landed * item.qty)
-      };
-    });
-    setItems(updatedItems);
-  }, [exchangeRate, shippingCost, customsRate, items.length]);
 
   const handleProcess = async (f: File) => {
     setFile(f);
@@ -85,211 +57,221 @@ export default function Home() {
     try {
       const buffer = await f.arrayBuffer();
       const workbook = XLSX.read(buffer, { type: 'array' });
-      let clientExtractedData: any[] = [];
-      const targetSheets = workbook.SheetNames.filter(name => 
-          ['OZ', 'OH', '오즈', '매칭', '패킹'].some(k => name.includes(k))
+      let extractedData: any[] = [];
+
+      const targetSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const jsonData = XLSX.utils.sheet_to_json(targetSheet, { header: 1 }) as any[][];
+
+      let nameCol = -1, colorCol = -1, sizeStartCol = -1, sizeEndCol = -1;
+      const sizeHeaderRow = jsonData.find(row => 
+        row.some(c => String(c || "").includes('사이즈별수량') || String(c || "").includes('품명'))
       );
-      const sheetsToProcess = targetSheets.length > 0 ? targetSheets : [workbook.SheetNames[0]];
 
-      sheetsToProcess.forEach(sheetName => {
-          const worksheet = workbook.Sheets[sheetName];
-          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
-          if (jsonData.length === 0) return;
+      if (!sizeHeaderRow) throw new Error("유효한 패킹리스트 형식이 아닙니다.");
 
-          let nameCol = -1, colorCol = -1, totalCol = -1, sizeStartCol = -1, priceCol = -1;
-          jsonData.forEach((row) => {
-              if (nameCol !== -1) return;
-              const rowStr = row.map(c => String(c || "").trim()).join("|");
-              if (rowStr.includes('품명') && (rowStr.includes('합계') || rowStr.includes('수량'))) {
-                  row.forEach((cell, cellIdx) => {
-                      const c = String(cell || "").trim().toUpperCase();
-                      if (c === '품명' || c.includes('ITEM')) nameCol = cellIdx;
-                      else if (c === '칼라' || c === '색상' || c === 'COLOR') colorCol = cellIdx;
-                      else if (c === '합계' || c === '총계' || c === '수량' || c === 'TOTAL') totalCol = cellIdx;
-                      else if (c === '사이즈' || c === 'SIZE') sizeStartCol = cellIdx;
-                      else if (c.includes('단가') || c.includes('PRICE') || c.includes('CNY')) priceCol = cellIdx;
-                  });
-              }
-          });
-          if (nameCol === -1) return;
-          const startIdx = jsonData.findIndex(row => row.map(c => String(c || "").trim()).join("|").includes('품명')) + 1;
-          for (let i = startIdx; i < jsonData.length; i++) {
-              const row = jsonData[i];
-              const name = String(row[nameCol] || "").trim();
-              const qty = parseInt(String(row[totalCol] || "0").replace(/[^0-9]/g, ''));
-              const price = parseFloat(String(row[priceCol] || "0").replace(/[^0-9.]/g, '')) || 0;
-              if (name && qty > 0) {
-                  clientExtractedData.push({
-                      id: Math.random().toString(36).substr(2, 9),
-                      style: name,
-                      color: colorCol !== -1 ? String(row[colorCol] || "").trim() : "-",
-                      size: sizeStartCol !== -1 ? String(row[sizeStartCol] || "FREE").trim() : "FREE",
-                      qty, unitPriceCNY: price, originSheet: sheetName
-                  });
-              }
-          }
+      sizeHeaderRow.forEach((cell, idx) => {
+        const c = String(cell || "").trim();
+        if (c.includes('품명')) nameCol = idx;
+        if (c.includes('칼라') || c.includes('색상')) colorCol = idx;
+        // 사이즈 숫자가 시작되는 지점 찾기 (보통 90, 100... 또는 120, 130...)
+        if (!isNaN(parseInt(c)) && sizeStartCol === -1) sizeStartCol = idx;
+        if (sizeStartCol !== -1 && !isNaN(parseInt(c))) sizeEndCol = idx;
+        // S, M, L, FREE 등도 사이즈로 인식
+        if (['S', 'M', 'L', 'FREE'].includes(c.toUpperCase()) && sizeStartCol === -1) sizeStartCol = idx;
+        if (sizeStartCol !== -1 && ['S', 'M', 'L', 'FREE'].includes(c.toUpperCase())) sizeEndCol = idx;
       });
 
+      const startIdx = jsonData.indexOf(sizeHeaderRow) + 1;
+      
+      for (let i = startIdx; i < jsonData.length; i++) {
+        const row = jsonData[i];
+        const name = String(row[nameCol] || "").trim();
+        const color = String(row[colorCol] || "").trim();
+
+        if (name && name !== '합계' && color) {
+          for (let sIdx = sizeStartCol; sIdx <= sizeEndCol; sIdx++) {
+            const qty = parseInt(String(row[sIdx] || "0").replace(/[^0-9]/g, ''));
+            const sizeLabel = String(sizeHeaderRow[sIdx] || "").trim();
+
+            if (qty > 0) {
+              extractedData.push({
+                id: Math.random().toString(36).substr(2, 9),
+                style: name,
+                color: color,
+                size: sizeLabel,
+                qty: qty
+              });
+            }
+          }
+        }
+      }
+
+      // 서버 매칭 API 호출
       const res = await fetch('/api/china/convert', { 
           method: 'POST', 
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ items: clientExtractedData, fileName: f.name })
+          body: JSON.stringify({ items: extractedData, fileName: f.name })
       });
       const data = await res.json();
-      if (data.success) {
-          setItems(data.items);
-          if (dbStatus === 'connected') {
-            await supabase.from('upload_logs').insert({
-                file_name: f.name,
-                item_count: data.items.length,
-                total_qty: data.items.reduce((acc: number, i: any) => acc + i.qty, 0)
-            });
-          }
-      }
-    } catch (e: any) { alert(e.message || 'Error'); }
+      if (data.success) setItems(data.items);
+
+    } catch (e: any) { alert(e.message); }
     finally { setLoading(false); }
   };
 
-  const handleExport = async () => {
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('신고단가결과');
-    worksheet.columns = [
-      { header: '상품코드', key: 'matchedCode', width: 20 },
-      { header: '상품명', key: 'matchedName', width: 40 },
-      { header: '색상', key: 'color', width: 15 },
-      { header: '사이즈', key: 'size', width: 12 },
-      { header: '수량', key: 'qty', width: 10 },
-      { header: '신고단가(CNY)', key: 'unitPriceCNY', width: 15 },
-      { header: '원화환산가(KRW)', key: 'landedCostKRW', width: 15 },
-      { header: '합계(KRW)', key: 'totalCostKRW', width: 20 },
-    ];
-    items.forEach(item => worksheet.addRow(item));
-    const buffer = await workbook.xlsx.writeBuffer();
-    saveAs(new Blob([buffer]), `신고단가_${file?.name || '결과'}.xlsx`);
-  };
+  const totalQty = items.reduce((acc, i) => acc + i.qty, 0);
 
   return (
-    <div className="relative min-h-screen selection:bg-blue-500/30 overflow-x-hidden">
-      <div className="aurora" />
-      
-      <nav className="sticky top-0 z-50 px-8 py-4 flex justify-between items-center bg-black/40 backdrop-blur-xl border-b border-white/5">
-        <div className="flex items-center gap-3">
-          <Globe className="h-6 w-6 text-blue-500" />
-          <span className="text-xl font-black tracking-tighter text-white uppercase">China Declaration Sync</span>
-        </div>
-        <div className="flex items-center gap-3">
-           <div className={`h-2 w-2 rounded-full ${dbStatus === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
-           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">DB {dbStatus}</span>
-        </div>
-      </nav>
+    <div className="min-h-screen bg-[#F8F9FD] text-[#1A1C21] font-sans selection:bg-blue-500/10">
+      <div className="flex h-screen overflow-hidden">
+        
+        {/* LEFT SIDEBAR */}
+        <aside className="w-80 bg-white border-r border-slate-200 flex flex-col p-8 gap-10">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 bg-red-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-red-500/20">
+              <FileSpreadsheet className="w-6 h-6" />
+            </div>
+            <div>
+              <h1 className="text-xl font-black tracking-tight uppercase">China Sync</h1>
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Data Integrity v3.0</div>
+            </div>
+          </div>
 
-      <main className="max-w-6xl mx-auto px-8 pt-16 pb-32">
-        <div className="space-y-12">
-            
-            <header className="text-center space-y-4">
-                <h1 className="title-hero text-gradient">EXTRACT & SYNC.</h1>
-                <p className="text-slate-400 max-w-xl mx-auto font-medium">중국 패킹리스트 엑셀 파일을 업로드하여 상품 매칭과 단가 추출을 시작하세요.</p>
-            </header>
-
-            {!file ? (
-                <div 
-                    onClick={() => fileInputRef.current?.click()}
-                    className="hyper-card p-24 flex flex-col items-center justify-center cursor-pointer hover:bg-white/[0.05]"
-                >
-                    <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => e.target.files?.[0] && handleProcess(e.target.files[0])} />
-                    <div className="h-20 w-20 rounded-3xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-500 mb-8">
-                        {loading ? <Loader2 className="h-8 w-8 animate-spin" /> : <FileUp className="h-8 w-8" />}
-                    </div>
-                    <h2 className="text-2xl font-bold mb-2">파일 업로드</h2>
-                    <p className="text-slate-500 font-medium">드래그하거나 클릭하여 시작</p>
+          <div className="flex-1 space-y-6">
+             <div className="rounded-3xl border-2 border-dashed border-slate-200 p-8 flex flex-col items-center justify-center text-center gap-4 group hover:border-blue-500/50 transition-all cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => e.target.files?.[0] && handleProcess(e.target.files[0])} />
+                <div className="w-16 h-16 rounded-2xl bg-slate-50 flex items-center justify-center group-hover:bg-blue-50 transition-colors">
+                  {loading ? <RefreshCcw className="w-8 h-8 text-blue-500 animate-spin" /> : <FileUp className="w-8 h-8 text-slate-400 group-hover:text-blue-500" />}
                 </div>
-            ) : (
-                <div className="space-y-10 animate-in fade-in slide-in-from-bottom-8 duration-500">
-                    
-                    {/* Compact Config */}
-                    <div className="hyper-card p-8 grid grid-cols-1 md:grid-cols-3 gap-8">
-                        {[
-                            { label: '환율 (CNY/KRW)', icon: DollarSign, val: exchangeRate, set: setExchangeRate },
-                            { label: '물류비 (KRW)', icon: Ship, val: shippingCost, set: setShippingCost },
-                            { label: '관세율 (%)', icon: ShieldCheck, val: customsRate, set: setCustomsRate },
-                        ].map((cfg, i) => (
-                            <div key={i} className="space-y-3">
-                                <label className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase">
-                                    <cfg.icon className="h-3 w-3" /> {cfg.label}
-                                </label>
-                                <input 
-                                    type="number" 
-                                    value={cfg.val} 
-                                    onChange={(e) => cfg.set(Number(e.target.value))}
-                                    className="input-hyper"
-                                />
-                            </div>
-                        ))}
-                    </div>
-
-                    {/* Results Table Header */}
-                    <div className="flex justify-between items-end px-2">
-                        <div>
-                            <h3 className="text-xl font-bold">Matching Results</h3>
-                            <p className="text-slate-500 text-xs mt-1">{file.name} · {items.length} items</p>
-                        </div>
-                        <div className="flex gap-3">
-                            <button onClick={() => {setFile(null); setItems([])}} className="px-5 py-3 rounded-xl border border-white/5 font-bold text-[11px] hover:bg-white/5 transition-all uppercase">Reset</button>
-                            <button onClick={handleExport} className="btn-hyper !py-3">
-                                <Download className="h-4 w-4" /> Export Result
-                            </button>
-                        </div>
-                    </div>
-                    
-                    {/* Simple Clean Table */}
-                    <div className="overflow-x-auto">
-                        <table className="custom-table">
-                            <thead>
-                                <tr>
-                                    <th>Status</th>
-                                    <th>Product Info</th>
-                                    <th>Specs</th>
-                                    <th>Qty</th>
-                                    <th>Price (CNY)</th>
-                                    <th>Total (KRW)</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {items.map((item) => (
-                                    <tr key={item.id}>
-                                        <td>
-                                            {item.isMatched ? (
-                                                <span className="badge-success">Matched</span>
-                                            ) : (
-                                                <span className="badge-warning">Pending</span>
-                                            )}
-                                        </td>
-                                        <td>
-                                            <div className="font-bold text-slate-100">{item.matchedName}</div>
-                                            <div className="text-[10px] font-bold text-blue-500 mt-0.5 uppercase">{item.matchedCode}</div>
-                                        </td>
-                                        <td>
-                                            <div className="flex gap-2">
-                                                <span className="text-[10px] text-slate-500 uppercase">{item.color}</span>
-                                                <span className="text-[10px] text-slate-500 uppercase">{item.size}</span>
-                                            </div>
-                                        </td>
-                                        <td className="font-bold">{item.qty}</td>
-                                        <td className="text-slate-400">¥ {item.unitPriceCNY.toFixed(2)}</td>
-                                        <td className="text-white font-black">₩ {item.totalCostKRW.toLocaleString()}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
+                <div>
+                  <div className="font-bold text-sm">{file ? 'Excel Loaded' : 'Upload Excel'}</div>
+                  <div className="text-[10px] text-slate-400 font-medium mt-1 truncate w-40">{file ? file.name : 'Drag or Click'}</div>
                 </div>
-            )}
-        </div>
-      </main>
+             </div>
 
-      <footer className="py-12 text-center border-t border-white/5">
-         <span className="text-[10px] font-black text-slate-700 uppercase tracking-widest">© 2026 China Declaration Sync</span>
-      </footer>
+             <div className="space-y-3">
+                <button className="w-full py-4 px-6 rounded-2xl bg-[#1A1C21] text-white font-bold text-sm flex items-center justify-center gap-3 shadow-xl shadow-black/10 hover:scale-[1.02] transition-all">
+                  <ArrowRightLeft className="w-4 h-4" /> SYNC CHINA DATA
+                </button>
+                <button className="w-full py-4 px-6 rounded-2xl bg-red-500 text-white font-bold text-sm flex items-center justify-center gap-3 shadow-xl shadow-red-500/20 hover:scale-[1.02] transition-all uppercase">
+                  <Download className="w-4 h-4" /> Download Final Excel
+                </button>
+                <button className="w-full py-4 px-6 rounded-2xl bg-white border border-slate-200 text-[#1A1C21] font-bold text-sm flex items-center justify-center gap-3 hover:bg-slate-50 transition-all uppercase">
+                  <Printer className="w-4 h-4" /> Print Pallet Labels
+                </button>
+             </div>
+          </div>
+
+          <div className="flex items-center justify-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${dbStatus === 'connected' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">DB {dbStatus}</span>
+          </div>
+        </aside>
+
+        {/* MAIN CONTENT */}
+        <main className="flex-1 overflow-y-auto p-12 space-y-10">
+          
+          {/* HEADER SUMMARY */}
+          <section className="bg-white rounded-[2.5rem] p-10 border border-slate-200 shadow-sm flex items-center gap-12">
+            <div className="w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center text-red-500">
+               <ArrowRightLeft className="w-8 h-8" />
+            </div>
+            <div className="flex gap-16">
+              <div className="space-y-1">
+                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">China Integrity Summary</div>
+                <div className="flex gap-8 items-end">
+                   <div>
+                      <div className="text-[9px] font-bold text-red-400 uppercase mb-1">Original Qty</div>
+                      <div className="text-3xl font-black">{totalQty.toLocaleString()}</div>
+                   </div>
+                   <div>
+                      <div className="text-[9px] font-bold text-red-400 uppercase mb-1">DB Matched</div>
+                      <div className="text-3xl font-black text-red-500">{items.filter(i => i.isMatched).reduce((acc, i) => acc + i.qty, 0).toLocaleString()}</div>
+                   </div>
+                </div>
+              </div>
+            </div>
+            <div className="ml-auto flex flex-col items-end gap-2">
+              <div className="flex items-center gap-2 text-emerald-500 font-bold text-xs">
+                <CheckCircle2 className="w-4 h-4" /> VERIFIED
+              </div>
+              <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest italic">Factory-to-Cloud Stream...</div>
+            </div>
+          </section>
+
+          {/* LIST SECTION */}
+          <section className="space-y-6">
+            <div className="flex items-center justify-between px-4">
+              <div className="flex items-center gap-3">
+                <PackageCheck className="w-5 h-5 text-red-500" />
+                <span className="text-xs font-black text-slate-400 uppercase tracking-[0.3em]">China Production Stream</span>
+              </div>
+              <div className="flex gap-4">
+                <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400"><RefreshCcw className="w-4 h-4" /></div>
+                <button className="px-4 py-2 bg-red-50 text-red-500 text-[10px] font-black rounded-lg uppercase">오즈키즈</button>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-[2rem] border border-slate-200 overflow-hidden shadow-sm">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Master SKU</th>
+                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Detail Matrix</th>
+                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Qty Score</th>
+                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Valid</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <AnimatePresence>
+                    {items.length > 0 ? items.map((item, idx) => (
+                      <motion.tr 
+                        key={item.id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: idx * 0.01 }}
+                        className="group hover:bg-slate-50/50 transition-colors border-b border-slate-50 last:border-0"
+                      >
+                        <td className="px-10 py-8">
+                          <div className={`text-sm font-bold ${item.isMatched ? 'text-slate-700' : 'text-slate-400'}`}>
+                            {item.isMatched ? item.matchedCode : '미매칭'}
+                          </div>
+                        </td>
+                        <td className="px-10 py-8">
+                          <div className="space-y-1">
+                            <div className="inline-block px-2 py-0.5 bg-red-50 text-red-500 text-[9px] font-black rounded uppercase">Ref: {item.style}</div>
+                            <div className="text-lg font-black text-slate-800 tracking-tight">{item.isMatched ? item.matchedName : item.style}</div>
+                            <div className="text-[10px] font-bold text-slate-400 uppercase">{item.size} / {item.color}</div>
+                          </div>
+                        </td>
+                        <td className="px-10 py-8 text-center">
+                          <div className="text-lg font-black text-slate-800">{item.qty}</div>
+                        </td>
+                        <td className="px-10 py-8">
+                          <div className="flex justify-end gap-3">
+                             <div className={`w-8 h-8 rounded-full flex items-center justify-center border ${item.isMatched ? 'border-emerald-100 text-emerald-500' : 'border-red-100 text-red-500'}`}>
+                                {item.isMatched ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                             </div>
+                             <div className="w-8 h-8 rounded-full flex items-center justify-center border border-slate-100 text-slate-300">
+                                <RefreshCcw className="w-4 h-4" />
+                             </div>
+                          </div>
+                        </td>
+                      </motion.tr>
+                    )) : (
+                      <tr>
+                        <td colSpan={4} className="py-40 text-center">
+                          <div className="text-slate-300 font-bold text-sm uppercase tracking-widest">No Data Available</div>
+                        </td>
+                      </tr>
+                    )}
+                  </AnimatePresence>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </div>
     </div>
   )
 }
