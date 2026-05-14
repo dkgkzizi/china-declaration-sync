@@ -42,19 +42,24 @@ export async function matchItems(rawItems: any[]): Promise<any[]> {
             .select('original_style, product_code, matched_name, color, size')
             .in('original_style', uniqueStyles);
 
-        // 2. mapping_data (기존 매핑 데이터) 조회
-        const { data: mappingRows } = await supabase
-            .from('mapping_data')
-            .select('상품명, 상품코드, 바코드, 옵션')
-            .or(uniqueStyles.slice(0, 40).map(s => `상품명.ilike.%${normalizeStr(s)}%,상품코드.ilike.%${normalizeStr(s)}%`).join(','));
+        let mappingRows: any[] = [];
+        let productRows: any[] = [];
 
-        // 3. products 테이블 조회 (백업)
-        const { data: productRows } = await supabase
-            .from('products')
-            .select('상품명, 상품코드, 바코드, 옵션')
-            .or(uniqueStyles.slice(0, 30).map(s => `상품명.ilike.%${s}%,상품코드.ilike.%${s}%`).join(','));
+        for (let i = 0; i < uniqueStyles.length; i += 20) {
+            const chunk = uniqueStyles.slice(i, i + 20);
+            const orQuery = chunk.map(s => {
+                const s1 = s.replace(/[^a-zA-Z0-9가-힣]/g, '');
+                return `상품명.ilike.%${s}%,상품코드.ilike.%${s}%,상품명.ilike.%${s1}%`;
+            }).join(',');
 
-        const dbRows = [...(mappingRows || []), ...(productRows || [])];
+            const { data: mRows } = await supabase.from('mapping_data').select('상품명, 상품코드, 바코드, 옵션').or(orQuery);
+            if (mRows) mappingRows.push(...mRows);
+
+            const { data: pRows } = await supabase.from('products').select('상품명, 상품코드, 바코드, 옵션').or(orQuery);
+            if (pRows) productRows.push(...pRows);
+        }
+
+        const dbRows = [...mappingRows, ...productRows];
 
         const results = rawItems.map(record => {
             const style = record.style || record.name;

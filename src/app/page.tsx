@@ -371,78 +371,78 @@ export default function Page() {
               </div>
 
               {/* 결과 패널 */}
-              <div className="lg:col-span-8 space-y-6">
+              <div className="lg:col-span-8 space-y-4">
                 {/* 요약 */}
-                <div className="bg-white border border-slate-200 rounded-[2.5rem] p-8 shadow-xl shadow-slate-200/50">
-                  <div className="flex items-center gap-6">
-                    <div className="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center text-red-500">
-                      <ArrowRightLeft className="w-6 h-6" />
+                <div className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-lg shadow-slate-200/50">
+                  <div className="flex items-center gap-5">
+                    <div className="w-12 h-12 rounded-xl bg-red-50 flex items-center justify-center text-red-500">
+                      <ArrowRightLeft className="w-5 h-5" />
                     </div>
                     <div>
-                      <div className="text-[9px] font-black text-red-500 uppercase tracking-widest mb-2">China Integrity Summary</div>
-                      <div className="flex items-end gap-10">
+                      <div className="text-[9px] font-black text-red-500 uppercase tracking-widest mb-1.5">China Integrity Summary</div>
+                      <div className="flex items-end gap-8">
                         <div>
                           <div className="text-[9px] font-bold text-slate-400 uppercase mb-1">Original Qty</div>
-                          <div className="text-3xl font-black text-slate-800">{totalQty.toLocaleString()}</div>
+                          <div className="text-2xl font-black text-slate-800">{totalQty.toLocaleString()}</div>
                         </div>
                         <div>
                           <div className="text-[9px] font-bold text-slate-400 uppercase mb-1">DB Matched</div>
-                          <div className="text-3xl font-black text-red-600">{matchedQty.toLocaleString()}</div>
+                          <div className="text-2xl font-black text-red-600">{matchedQty.toLocaleString()}</div>
                         </div>
                       </div>
                     </div>
                     {items.length > 0 && totalQty === matchedQty && (
                       <div className="ml-auto flex flex-col items-end gap-1">
-                        <div className="flex items-center gap-1.5 text-emerald-500 font-black text-xs">
-                          <CheckCircle2 className="w-4 h-4" /> VERIFIED
+                        <div className="flex items-center gap-1.5 text-emerald-500 font-black text-[10px]">
+                          <CheckCircle2 className="w-3.5 h-3.5" /> VERIFIED
                         </div>
-                        <div className="text-[9px] text-slate-400 uppercase italic tracking-wider">Factory-to-Cloud Str...</div>
+                        <div className="text-[8px] text-slate-400 uppercase italic tracking-wider">Factory-to-Cloud Str...</div>
                       </div>
                     )}
                   </div>
                 </div>
 
                 {error && (
-                  <div className="bg-red-50 border border-red-100 rounded-2xl p-5 flex items-center gap-3 text-red-600 font-semibold text-sm">
+                  <div className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center gap-3 text-red-600 font-semibold text-sm">
                     <AlertCircle className="w-5 h-5 flex-shrink-0" /> {error}
                   </div>
                 )}
 
                 {/* 결과 테이블 */}
-                <div className="bg-white border border-slate-200 rounded-[2.5rem] shadow-xl shadow-slate-200/50 overflow-hidden">
-                  <div className="flex items-center justify-between px-8 py-5 border-b border-slate-100">
+                <div className="bg-white border border-slate-200 rounded-[2rem] shadow-lg shadow-slate-200/50 overflow-hidden">
+                  <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
                     <div className="flex items-center gap-2">
                       <TrendingUp className="w-4 h-4 text-red-500" />
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">China Production Stream</span>
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">China Production Stream</span>
                     </div>
-                    {items.length > 0 && <span className="text-[10px] font-bold text-slate-400">{items.length}개 항목</span>}
+                    {items.length > 0 && <span className="text-[9px] font-bold text-slate-400">{items.length}개 항목</span>}
                   </div>
                   <div className="max-h-[600px] overflow-y-auto relative styled-scrollbar">
                     <table className="w-full text-left">
                       <thead className="sticky top-0 bg-white/95 backdrop-blur-sm z-10 shadow-sm border-b border-slate-100">
                         <tr>
                           {['Master SKU', 'Detail Matrix', 'Qty Score', 'Valid'].map(h => (
-                            <th key={h} className="px-6 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest">{h}</th>
+                            <th key={h} className="px-5 py-2.5 text-[8px] font-black text-slate-400 uppercase tracking-widest">{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
                         {items.length === 0 ? (
-                          <tr><td colSpan={4} className="px-6 py-32 text-center text-slate-300 text-sm font-bold uppercase tracking-widest">좌측에서 패킹리스트 파일을 업로드하세요</td></tr>
+                          <tr><td colSpan={4} className="px-5 py-24 text-center text-slate-300 text-xs font-bold uppercase tracking-widest">좌측에서 패킹리스트 파일을 업로드하세요</td></tr>
                         ) : items.map((item, idx) => (
                           <tr key={item.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors group">
-                            <td className="px-6 py-3">
-                              <span className={`text-sm font-bold ${item.isMatched ? 'text-slate-700' : 'text-red-400'}`}>
+                            <td className="px-5 py-2.5">
+                              <span className={`text-xs font-bold ${item.isMatched ? 'text-slate-700' : 'text-red-400'}`}>
                                 {item.isMatched ? item.matchedCode : '미매칭'}
                               </span>
                             </td>
-                            <td className="px-6 py-3">
-                              <div className="inline-block px-2 py-0.5 bg-red-50 text-red-400 text-[9px] font-black rounded mb-1 uppercase">REF: {item.style}</div>
-                              <div className="text-base font-black text-slate-800 leading-tight">{item.matchedName}</div>
-                              <div className="text-[10px] text-slate-400 font-medium mt-0.5 uppercase">{item.size} / {item.color || '-'}</div>
+                            <td className="px-5 py-2.5">
+                              <div className="inline-block px-1.5 py-0.5 bg-red-50 text-red-400 text-[8px] font-black rounded mb-0.5 uppercase">REF: {item.style}</div>
+                              <div className="text-sm font-black text-slate-800 leading-tight">{item.matchedName}</div>
+                              <div className="text-[9px] text-slate-400 font-medium mt-0.5 uppercase">{item.size} / {item.color || '-'}</div>
                             </td>
-                            <td className="px-6 py-3"><span className="text-lg font-black text-slate-700">{item.qty}</span></td>
-                            <td className="px-6 py-3">
+                            <td className="px-5 py-2.5"><span className="text-base font-black text-slate-700">{item.qty}</span></td>
+                            <td className="px-5 py-2.5">
                             <div className="flex items-center gap-2">
                               {item.isMatched
                                 ? <div className="w-7 h-7 rounded-full border border-emerald-200 flex items-center justify-center text-emerald-500"><CheckCircle2 className="w-4 h-4" /></div>
