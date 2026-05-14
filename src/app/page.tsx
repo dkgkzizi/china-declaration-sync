@@ -33,86 +33,174 @@ export default function Page() {
   const [searchLoading, setSearchLoading] = useState(false);
 
   const parseAndMatch = async (f: File) => {
-    setFile(f); setError(''); setItems([]); setLoading(true);
+    setError(''); setItems([]); setLoading(true);
     try {
       const buffer = await f.arrayBuffer();
       const wb = XLSX.read(buffer, { type: 'array' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const raw = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+      
+      let clientExtractedData: any[] = [];
+      const targetSheets = wb.SheetNames.filter(name => 
+          name.includes('OZ') || name.includes('OH') || name.includes('오즈') || name.includes('오에이치') || name.includes('매칭')
+      );
+      const sheetsToProcess = targetSheets.length > 0 ? targetSheets : 
+                             (wb.SheetNames.length >= 2 ? [wb.SheetNames[1]] : wb.SheetNames);
 
-      let headerRowIdx = -1, nameCol = -1, colorCol = -1;
-      let sizeCols: { col: number; label: string }[] = [];
+      sheetsToProcess.forEach(sheetName => {
+          const worksheet = wb.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+          if (jsonData.length === 0) return;
 
-      for (let r = 0; r < raw.length; r++) {
-        const rowStr = raw[r].map((c: any) => String(c ?? '').trim());
-        const nameIdx = rowStr.findIndex((c: any) => {
-          if (!c) return false;
-          const str = String(c).replace(/\s/g, '');
-          return str === '품명' || str === 'ITEM' || str.includes('품명');
-        });
-
-        if (nameIdx !== -1) {
-          headerRowIdx = r; nameCol = nameIdx;
-          colorCol = rowStr.findIndex((c: any) => {
-            if (!c) return false;
-            const str = String(c).replace(/\s/g, '');
-            return str.includes('칼라') || str.includes('색상') || str.includes('COLOR');
-          });
-
-          // 1. 현재 행에서 사이즈 컬럼(숫자 또는 S/M/L) 찾기
-          for (let c = nameIdx + 1; c < rowStr.length; c++) {
-            const v = String(rowStr[c] ?? '').trim();
-            if (!v) continue;
-            if (/^\d{2,3}$/.test(v) || ['S','M','L','XL','FREE', 'F'].includes(v.toUpperCase())) {
-              sizeCols.push({ col: c, label: v });
-            }
-          }
-
-          // 2. 현재 행에서 사이즈를 못 찾았다면, 다음 행 확인 (2줄 병합 헤더인 경우)
-          if (sizeCols.length === 0 && r + 1 < raw.length) {
-            const nextRowStr = raw[r + 1].map((c: any) => String(c ?? '').trim());
-            for (let c = 0; c < nextRowStr.length; c++) {
-              const v = String(nextRowStr[c] ?? '').trim();
-              if (!v) continue;
-              if (/^\d{2,3}$/.test(v) || ['S','M','L','XL','FREE', 'F'].includes(v.toUpperCase())) {
-                sizeCols.push({ col: c, label: v });
+          const headerRows: { rowIdx: number, nameCol: number, colorCol: number, totalCol: number, sizeStartCol: number, sizeEndCol: number, isMatrix: boolean }[] = [];
+          
+          jsonData.forEach((row, idx) => {
+              if (!Array.isArray(row)) return;
+              const rowStr = row.join('|');
+              if (rowStr.includes('품명') && (rowStr.includes('합계') || rowStr.includes('수량'))) {
+                  let nameCol = -1, colorCol = -1, totalCol = -1, sizeStartCol = -1, sizeEndCol = -1;
+                  row.forEach((cell, cellIdx) => {
+                      const c = String(cell || "").trim().toUpperCase();
+                      if (c === '품명' || c === 'ITEM' || c.includes('품명')) nameCol = cellIdx;
+                      else if (c === '칼라' || c === '색상' || c.includes('COLOR')) colorCol = cellIdx;
+                      else if (c === '합계' || c === '소계' || c === '총계' || c === '수량' || c === '총수량') totalCol = cellIdx;
+                      else if (c === '사이즈') sizeStartCol = cellIdx;
+                  });
+                  
+                  let isMatrix = false;
+                  let matrixSizeStart = -1;
+                  const nextRow = jsonData[idx + 1] || [];
+                  
+                  if (colorCol !== -1) {
+                      for (let i = colorCol + 1; i < Math.max(row.length, nextRow.length); i++) {
+                          if (i === totalCol) continue;
+                          const hStr = String(row[i] || "").trim();
+                          const nStr = String(nextRow[i] || "").trim();
+                          if ((hStr.match(/[0-9]/) || nStr.match(/[0-9]/)) && !hStr.includes('수량') && !nStr.includes('수량')) {
+                              matrixSizeStart = i;
+                              isMatrix = true;
+                              break;
+                          }
+                      }
+                  }
+                  
+                  if (isMatrix) {
+                      sizeStartCol = matrixSizeStart;
+                      sizeEndCol = 200; 
+                      if (totalCol !== -1 && sizeStartCol < totalCol) {
+                          sizeEndCol = totalCol - 1;
+                      }
+                  } else {
+                      sizeEndCol = sizeStartCol;
+                  }
+                  
+                  if (nameCol !== -1) {
+                      headerRows.push({ rowIdx: idx, nameCol, colorCol, totalCol, sizeStartCol, sizeEndCol, isMatrix });
+                  }
               }
-            }
-            if (sizeCols.length > 0) {
-              headerRowIdx = r + 1; // 데이터는 다음 행부터 시작
-            }
-          }
-          break;
-        }
-      }
-
-      if (headerRowIdx === -1) throw new Error('"품명" 컬럼을 찾지 못했습니다. 엑셀 형식을 확인해주세요.');
-
-      const extracted: any[] = [];
-      for (let r = headerRowIdx + 1; r < raw.length; r++) {
-        const row = raw[r];
-        if (!row) continue;
-        const name = String(row[nameCol] ?? '').trim();
-        const color = colorCol >= 0 ? String(row[colorCol] ?? '').trim() : '';
-        if (!name || name === '합계' || name.includes('TOTAL')) continue;
-        
-        if (sizeCols.length > 0) {
-          sizeCols.forEach(({ col, label }) => {
-            const cellValue = String(row[col] ?? '0').replace(/[^\d]/g, '');
-            const qty = parseInt(cellValue || '0', 10);
-            if (qty > 0) {
-              extracted.push({ style: name, color, size: label, qty });
-            }
           });
-        }
-      }
 
-      if (extracted.length === 0) throw new Error('유효한 데이터를 추출하지 못했습니다.');
+          headerRows.forEach((header: any, hIdx: number) => {
+              let lastName = "";
+              let lastColor = "";
+              
+              const headerRowData = jsonData[header.rowIdx];
+              const nextRow = jsonData[header.rowIdx + 1];
+              const currentHeaderHasSizes = headerRowData.slice(header.sizeStartCol).some(c => String(c).match(/[0-9]/));
+              const isTwoStepHeader = !currentHeaderHasSizes && nextRow && nextRow.slice(header.sizeStartCol).some(c => String(c).match(/[0-9]/));
+              
+              const sizeHeaderRowIdx = isTwoStepHeader ? header.rowIdx + 1 : header.rowIdx;
+              const dataStartRowIdx = isTwoStepHeader ? header.rowIdx + 2 : header.rowIdx + 1;
+              const nextHeaderRowIdx = hIdx + 1 < headerRows.length ? headerRows[hIdx + 1].rowIdx : jsonData.length;
+
+              for (let rIdx = dataStartRowIdx; rIdx < nextHeaderRowIdx; rIdx++) {
+                  const row = jsonData[rIdx];
+                  if (!row || !Array.isArray(row)) break;
+                  
+                  const rowStrAll = row.join('|');
+                  if (rIdx > dataStartRowIdx && rowStrAll.includes('품명') && rowStrAll.includes('칼라') && (rowStrAll.includes('합계') || rowStrAll.includes('수량'))) {
+                      continue; 
+                  }
+
+                  const fullRowStr = row.join('|');
+                  if (fullRowStr.includes('합계') || fullRowStr.includes('TOTAL') || fullRowStr.includes('소계') || fullRowStr.includes('총계') || fullRowStr.includes('총수량')) {
+                      continue; 
+                  }
+                  
+                  let nameOriginal = String(row[header.nameCol] || "").trim();
+                  let colorOriginal = String(row[header.colorCol] || "").trim();
+
+                  if (!nameOriginal && !colorOriginal) {
+                      const hasTotalQty = header.totalCol !== -1 && parseInt(String(row[header.totalCol] || "0").replace(/[^0-9]/g, '')) > 0;
+                      if (hasTotalQty) continue;
+                  }
+
+                  let currentName = nameOriginal;
+                  if (!currentName && lastName) {
+                      currentName = lastName;
+                  } else if (currentName) {
+                      if (currentName !== lastName) lastColor = "";
+                      lastName = currentName;
+                  }
+
+                  if (!currentName) continue;
+                  
+                  let color = String(row[header.colorCol] || "").trim();
+                  if (!color && lastColor) {
+                      color = lastColor;
+                  } else {
+                      lastColor = color;
+                  }
+                  
+                  let totalQty = header.totalCol !== -1 ? (parseInt(String(row[header.totalCol] || "0").replace(/[^0-9]/g, '')) || 0) : 0;
+                  
+                  if (totalQty > 0 || row.slice(header.sizeStartCol, header.sizeEndCol + 1).some(c => parseInt(String(c||'0').replace(/[^0-9]/g,''))>0)) {
+                      if (header.isMatrix) {
+                          let foundSizes = false;
+                          for (let sIdx = header.sizeStartCol; sIdx <= header.sizeEndCol; sIdx++) {
+                              const sVal = parseInt(String(row[sIdx] || "0").replace(/[^0-9]/g, ''));
+                              if (sVal > 0) {
+                                  let sHeader = String(jsonData[sizeHeaderRowIdx]?.[sIdx] || "").trim();
+                                  if (!sHeader || sHeader.includes('사이즈')) sHeader = "FREE";
+                                  
+                                  clientExtractedData.push({ 
+                                      style: currentName, 
+                                      color: color, 
+                                      size: sHeader, 
+                                      qty: sVal
+                                  });
+                                  foundSizes = true;
+                              }
+                          }
+                          
+                          if (!foundSizes && totalQty > 0) {
+                              clientExtractedData.push({ 
+                                  style: currentName, 
+                                  color: color, 
+                                  size: "FREE", 
+                                  qty: totalQty
+                              });
+                          }
+                      } else {
+                          const sizeStr = header.sizeStartCol !== -1 ? String(row[header.sizeStartCol] || "FREE").trim() : "FREE";
+                          clientExtractedData.push({ 
+                              style: currentName, 
+                              color: color, 
+                              size: sizeStr, 
+                              qty: totalQty
+                          });
+                      }
+                  }
+              }
+          });
+      });
+
+      if (clientExtractedData.length === 0) {
+          throw new Error("엑셀 파일의 탭에서 유효한 데이터를 찾지 못했습니다.");
+      }
 
       const res = await fetch('/api/china/convert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: extracted, fileName: f.name })
+        body: JSON.stringify({ items: clientExtractedData, fileName: f.name })
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.message || '매칭 실패');
@@ -251,13 +339,13 @@ export default function Page() {
                   <div
                     onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
                     onDragLeave={() => setIsDragging(false)}
-                    onDrop={e => { e.preventDefault(); setIsDragging(false); const f = e.dataTransfer.files?.[0]; if (f) parseAndMatch(f); }}
+                    onDrop={e => { e.preventDefault(); setIsDragging(false); const f = e.dataTransfer.files?.[0]; if (f) setFile(f); }}
                     onClick={() => fileRef.current?.click()}
                     className={`relative h-72 border-2 border-dashed rounded-[2rem] flex flex-col items-center justify-center transition-all duration-300 cursor-pointer ${
                       isDragging ? 'border-red-500 bg-red-50/30' : file ? 'border-red-100 bg-red-50/10' : 'border-slate-100 bg-slate-50 hover:bg-red-50/50'
                     }`}
                   >
-                    <input ref={fileRef} type="file" className="hidden" accept=".xlsx,.xls" onChange={e => e.target.files?.[0] && parseAndMatch(e.target.files[0])} />
+                    <input ref={fileRef} type="file" className="hidden" accept=".xlsx,.xls" onChange={e => e.target.files?.[0] && setFile(e.target.files[0])} />
                     <div className="flex flex-col items-center text-center p-6">
                       <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-5 transition-all duration-500 ${file ? 'bg-red-600 text-white shadow-lg shadow-red-200' : 'bg-white border border-slate-100 text-slate-300'}`}>
                         {loading ? <Loader2 className="w-8 h-8 animate-spin" /> : <FileSpreadsheet className="w-8 h-8" />}
@@ -267,7 +355,7 @@ export default function Page() {
                     </div>
                   </div>
                   <div className="mt-6 space-y-3">
-                    <button onClick={() => fileRef.current?.click()} className="w-full py-4 px-6 rounded-2xl bg-[#1a1c21] text-white font-black text-xs tracking-widest flex items-center justify-center gap-3 hover:bg-[#2d3139] transition-all">
+                    <button onClick={() => file && parseAndMatch(file)} disabled={!file || loading} className="w-full py-4 px-6 rounded-2xl bg-[#1a1c21] text-white font-black text-xs tracking-widest flex items-center justify-center gap-3 hover:bg-[#2d3139] transition-all disabled:opacity-50 disabled:cursor-not-allowed">
                       <ArrowRightLeft className="w-4 h-4" /> START EXTRACTION
                     </button>
                     <button onClick={handleDownload} disabled={items.length === 0} className="w-full py-4 px-6 rounded-2xl bg-red-600 text-white font-black text-xs tracking-widest flex items-center justify-center gap-3 shadow-lg shadow-red-200 hover:bg-red-700 transition-all disabled:opacity-30 disabled:cursor-not-allowed">
