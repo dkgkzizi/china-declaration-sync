@@ -1,42 +1,46 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { 
-  FileSpreadsheet, ChevronRight, TrendingUp, Download, 
-  RefreshCcw, Loader2, ArrowRightLeft, CheckCircle2, AlertCircle,
-  Lock
-} from 'lucide-react';
+import { FileSpreadsheet, ChevronRight, TrendingUp, Download, RefreshCcw, Loader2, ArrowRightLeft, CheckCircle2, AlertCircle, Lock, Search, X, Edit2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 
-interface RowItem {
+interface MatchedItem {
   id: string;
-  name: string;
+  style: string;
+  matchedCode: string;
+  matchedName: string;
   color: string;
   size: string;
   qty: number;
+  isMatched: boolean;
 }
 
 export default function Page() {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
-  const [rows, setRows] = useState<RowItem[]>([]);
+  const [items, setItems] = useState<MatchedItem[]>([]);
   const [error, setError] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const parseAndLoad = async (f: File) => {
-    setFile(f);
-    setError('');
-    setRows([]);
-    setLoading(true);
+  // 수동 매칭 모달
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editIdx, setEditIdx] = useState<number | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+
+  const parseAndMatch = async (f: File) => {
+    setFile(f); setError(''); setItems([]); setLoading(true);
     try {
       const buffer = await f.arrayBuffer();
       const wb = XLSX.read(buffer, { type: 'array' });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const raw = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
 
-      let headerRowIdx = -1, nameCol = -1, colorCol = -1;
-      let sizeStartCol = -1;
+      let headerRowIdx = -1, nameCol = -1, colorCol = -1, sizeStartCol = -1;
       let sizeLabels: string[] = [];
 
       for (let r = 0; r < raw.length; r++) {
@@ -44,8 +48,7 @@ export default function Page() {
         const nameIdx = rowStr.indexOf('품명');
         if (nameIdx !== -1) {
           headerRowIdx = r; nameCol = nameIdx;
-          const colorIdx = rowStr.findIndex((c: string) => c === '칼라' || c === '색상');
-          colorCol = colorIdx;
+          colorCol = rowStr.findIndex((c: string) => c === '칼라' || c === '색상');
           for (let c = nameIdx + 1; c < rowStr.length; c++) {
             const v = rowStr[c];
             if (/^\d{2,3}$/.test(v) || ['S','M','L','XL','FREE'].includes(v.toUpperCase())) {
@@ -59,7 +62,7 @@ export default function Page() {
 
       if (headerRowIdx === -1) throw new Error('"품명" 컬럼을 찾지 못했습니다.');
 
-      const result: RowItem[] = [];
+      const extracted: any[] = [];
       for (let r = headerRowIdx + 1; r < raw.length; r++) {
         const row = raw[r];
         const name = String(row[nameCol] ?? '').trim();
@@ -68,12 +71,21 @@ export default function Page() {
         if (sizeStartCol !== -1 && sizeLabels.length > 0) {
           sizeLabels.forEach((size, i) => {
             const qty = parseInt(String(row[sizeStartCol + i] ?? '0').replace(/[^\d]/g, ''));
-            if (qty > 0) result.push({ id: `${r}-${i}`, name, color, size, qty });
+            if (qty > 0) extracted.push({ style: name, color, size, qty });
           });
         }
       }
-      if (result.length === 0) throw new Error('유효한 데이터를 추출하지 못했습니다. 파일 형식을 확인해주세요.');
-      setRows(result);
+
+      if (extracted.length === 0) throw new Error('유효한 데이터를 추출하지 못했습니다.');
+
+      const res = await fetch('/api/china/convert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: extracted, fileName: f.name })
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.message || '매칭 실패');
+      setItems(data.items.map((item: any, i: number) => ({ ...item, id: `item-${i}` })));
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -81,35 +93,80 @@ export default function Page() {
     }
   };
 
-  const totalQty = rows.reduce((s, r) => s + r.qty, 0);
+  const handleSearch = async (val: string) => {
+    setSearchTerm(val);
+    if (val.length < 2) { setSearchResults([]); return; }
+    setSearchLoading(true);
+    try {
+      const res = await fetch(`/api/china/search?q=${encodeURIComponent(val)}`);
+      const data = await res.json();
+      if (data.success) setSearchResults(data.items);
+    } catch (e) { console.error(e); }
+    finally { setSearchLoading(false); }
+  };
+
+  const selectProduct = async (selected: any) => {
+    if (editIdx === null) return;
+    const targetStyle = items[editIdx].style;
+    const updated = items.map((item, idx) => {
+      if (item.style !== targetStyle) return item;
+      return { ...item, matchedCode: selected.productCode, matchedName: selected.matchedName, isMatched: true };
+    });
+    setItems(updated);
+    setModalOpen(false); setSearchTerm(''); setSearchResults([]);
+
+    // AI 학습
+    fetch('/api/china/learn', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        originalStyle: targetStyle,
+        matchedName: selected.matchedName,
+        productCode: selected.productCode,
+        color: items[editIdx].color,
+        size: items[editIdx].size
+      })
+    }).catch(console.error);
+  };
+
+  const handleDownload = async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('신고단가결과');
+    ws.columns = [
+      { header: '상품코드', key: 'matchedCode', width: 20 },
+      { header: '상품명', key: 'matchedName', width: 40 },
+      { header: '색상', key: 'color', width: 15 },
+      { header: '사이즈', key: 'size', width: 12 },
+      { header: '수량', key: 'qty', width: 10 },
+    ];
+    const hRow = ws.getRow(1);
+    hRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    hRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE53E3E' } };
+    items.forEach(item => ws.addRow(item));
+    const buf = await wb.xlsx.writeBuffer();
+    saveAs(new Blob([buf]), `신고단가_${file?.name || '결과'}.xlsx`);
+  };
+
+  const totalQty = items.reduce((s, r) => s + r.qty, 0);
+  const matchedQty = items.filter(i => i.isMatched).reduce((s, r) => s + r.qty, 0);
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-800 font-sans selection:bg-red-100 selection:text-red-900 overflow-x-hidden">
-      {/* Background Soft Gradients - 원본과 동일 */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
         <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-red-100/30 blur-[180px] rounded-full" />
         <div className="absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-rose-200/20 blur-[180px] rounded-full" />
       </div>
 
       <div className="relative z-10 flex min-h-screen">
-        {/* ── 사이드바 (원본과 동일한 구조) ── */}
+        {/* 사이드바 */}
         <nav className="w-80 border-r border-slate-200 sticky top-0 h-screen p-10 flex flex-col bg-white/70 backdrop-blur-2xl">
           <div className="mb-16">
-            <div className="flex items-center gap-3 mb-1 px-1">
-              <div className="flex flex-col">
-                <h1 className="text-5xl font-black tracking-[-0.05em] text-red-600 leading-none">
-                  ozkiz
-                </h1>
-                <span className="text-[10px] font-black text-slate-400 tracking-[0.4em] uppercase mt-3 ml-0.5">Declaration Sync</span>
-              </div>
-            </div>
+            <h1 className="text-5xl font-black tracking-[-0.05em] text-red-600 leading-none">ozkiz</h1>
+            <span className="text-[10px] font-black text-slate-400 tracking-[0.4em] uppercase mt-3 ml-0.5 block">Declaration Sync</span>
           </div>
-
           <div className="flex-1 space-y-2">
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 px-1">Declaration System</p>
-
-            {/* 활성 메뉴 - 중국 신고단가만 */}
-            <div className="w-full flex items-center gap-4 p-4 rounded-2xl bg-red-50 border border-slate-200 shadow-sm scale-[1.02]">
+            <div className="w-full flex items-center gap-4 p-4 rounded-2xl bg-red-50 border border-slate-200 shadow-sm">
               <div className="w-11 h-11 rounded-2xl flex items-center justify-center bg-white text-red-600 shadow-md">
                 <TrendingUp className="w-5 h-5" />
               </div>
@@ -117,38 +174,31 @@ export default function Page() {
                 <span className="text-sm font-black text-slate-900 tracking-tight leading-none mb-1">중국 신고단가</span>
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">China Declaration</span>
               </div>
-              <div className="ml-auto">
-                <ChevronRight className="w-4 h-4 text-red-600" />
-              </div>
+              <div className="ml-auto"><ChevronRight className="w-4 h-4 text-red-600" /></div>
             </div>
           </div>
-
           <div className="mt-auto space-y-4">
-            <button className="w-full flex items-center gap-3 p-4 rounded-2xl border transition-all font-bold text-[10px] uppercase tracking-[0.2em] bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200">
+            <button className="w-full flex items-center gap-3 p-4 rounded-2xl border font-bold text-[10px] uppercase tracking-[0.2em] bg-slate-100 text-slate-400 border-slate-200">
               <Lock className="w-3 h-3" /> Update Locked
             </button>
-            <div className="p-6 bg-slate-950 rounded-3xl shadow-xl shadow-slate-200 border border-white/10">
+            <div className="p-6 bg-slate-950 rounded-3xl shadow-xl border border-white/10">
               <div className="flex items-center gap-3">
                 <div className="w-3 h-3 rounded-full bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]" />
                 <div className="flex flex-col">
                   <span className="text-[10px] font-black text-white uppercase tracking-widest leading-none mb-1">Production: Active</span>
-                  <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest leading-none">OZ-Integrity Secured</span>
+                  <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">OZ-Integrity Secured</span>
                 </div>
               </div>
             </div>
           </div>
         </nav>
 
-        {/* ── 메인 콘텐츠 (원본과 동일한 구조) ── */}
-        <section className="flex-1 p-16 max-w-7xl mx-auto overflow-y-auto">
+        {/* 메인 */}
+        <section className="flex-1 p-16 overflow-y-auto">
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
-
-            {/* 페이지 헤더 */}
             <header className="mb-12">
               <div className="flex items-center gap-3 mb-4">
-                <div className="px-3 py-1 rounded-full bg-red-50 text-red-600 text-[10px] font-black uppercase tracking-widest border border-red-100">
-                  CATEGORY 1
-                </div>
+                <div className="px-3 py-1 rounded-full bg-red-50 text-red-600 text-[10px] font-black uppercase tracking-widest border border-red-100">CATEGORY 1</div>
                 <ChevronRight className="w-4 h-4 text-slate-300" />
                 <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                   <TrendingUp className="w-3 h-3 text-red-600" /> China Declaration Sync
@@ -164,58 +214,36 @@ export default function Page() {
             </header>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-
-              {/* ── 업로드 카드 (원본과 동일한 스타일) ── */}
+              {/* 업로드 카드 */}
               <div className="lg:col-span-4">
-                <div className="bg-white border border-slate-200 rounded-[2.5rem] p-8 shadow-xl shadow-slate-200/50 transition-all hover:shadow-2xl">
+                <div className="bg-white border border-slate-200 rounded-[2.5rem] p-8 shadow-xl shadow-slate-200/50 hover:shadow-2xl transition-all">
                   <div
                     onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
                     onDragLeave={() => setIsDragging(false)}
-                    onDrop={e => { e.preventDefault(); setIsDragging(false); const f = e.dataTransfer.files?.[0]; if (f) parseAndLoad(f); }}
+                    onDrop={e => { e.preventDefault(); setIsDragging(false); const f = e.dataTransfer.files?.[0]; if (f) parseAndMatch(f); }}
                     onClick={() => fileRef.current?.click()}
                     className={`relative h-72 border-2 border-dashed rounded-[2rem] flex flex-col items-center justify-center transition-all duration-300 cursor-pointer ${
-                      isDragging ? 'border-red-500 bg-red-50/30' :
-                      file ? 'border-red-100 bg-red-50/10' : 'border-slate-100 bg-slate-50 hover:bg-red-50/50'
+                      isDragging ? 'border-red-500 bg-red-50/30' : file ? 'border-red-100 bg-red-50/10' : 'border-slate-100 bg-slate-50 hover:bg-red-50/50'
                     }`}
                   >
-                    <input
-                      ref={fileRef} type="file" className="hidden"
-                      accept=".xlsx,.xls"
-                      onChange={e => e.target.files?.[0] && parseAndLoad(e.target.files[0])}
-                    />
+                    <input ref={fileRef} type="file" className="hidden" accept=".xlsx,.xls" onChange={e => e.target.files?.[0] && parseAndMatch(e.target.files[0])} />
                     <div className="flex flex-col items-center text-center p-6">
-                      <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-5 transition-all duration-500 ${
-                        file ? 'bg-red-600 text-white shadow-lg shadow-red-200' : 'bg-white border border-slate-100 text-slate-300'
-                      }`}>
+                      <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-5 transition-all duration-500 ${file ? 'bg-red-600 text-white shadow-lg shadow-red-200' : 'bg-white border border-slate-100 text-slate-300'}`}>
                         {loading ? <Loader2 className="w-8 h-8 animate-spin" /> : <FileSpreadsheet className="w-8 h-8" />}
                       </div>
-                      <h4 className="text-slate-900 font-black text-base tracking-tight mb-1">
-                        {file ? 'Excel Loaded' : 'Upload China List'}
-                      </h4>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-4 italic truncate max-w-full">
-                        {file ? file.name : 'XLSX OR XLS FILE'}
-                      </p>
+                      <h4 className="text-slate-900 font-black text-base tracking-tight mb-1">{file ? 'Excel Loaded' : 'Upload China List'}</h4>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-4 italic truncate max-w-full">{file ? file.name : 'XLSX OR XLS FILE'}</p>
                     </div>
                   </div>
-
                   <div className="mt-6 space-y-3">
-                    <button
-                      onClick={() => fileRef.current?.click()}
-                      className="w-full py-4 px-6 rounded-2xl bg-[#1a1c21] text-white font-black text-xs tracking-widest flex items-center justify-center gap-3 hover:bg-[#2d3139] transition-all"
-                    >
+                    <button onClick={() => fileRef.current?.click()} className="w-full py-4 px-6 rounded-2xl bg-[#1a1c21] text-white font-black text-xs tracking-widest flex items-center justify-center gap-3 hover:bg-[#2d3139] transition-all">
                       <ArrowRightLeft className="w-4 h-4" /> START EXTRACTION
                     </button>
-                    <button
-                      disabled={rows.length === 0}
-                      className="w-full py-4 px-6 rounded-2xl bg-red-600 text-white font-black text-xs tracking-widest flex items-center justify-center gap-3 shadow-lg shadow-red-200 hover:bg-red-700 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-                    >
+                    <button onClick={handleDownload} disabled={items.length === 0} className="w-full py-4 px-6 rounded-2xl bg-red-600 text-white font-black text-xs tracking-widest flex items-center justify-center gap-3 shadow-lg shadow-red-200 hover:bg-red-700 transition-all disabled:opacity-30 disabled:cursor-not-allowed">
                       <Download className="w-4 h-4" /> DOWNLOAD FINAL EXCEL
                     </button>
                     {file && (
-                      <button
-                        onClick={() => { setFile(null); setRows([]); setError(''); }}
-                        className="w-full py-4 px-6 rounded-2xl border border-slate-200 text-slate-500 font-black text-xs tracking-widest flex items-center justify-center gap-3 hover:bg-slate-50 transition-all"
-                      >
+                      <button onClick={() => { setFile(null); setItems([]); setError(''); }} className="w-full py-4 px-6 rounded-2xl border border-slate-200 text-slate-500 font-black text-xs tracking-widest flex items-center justify-center gap-3 hover:bg-slate-50 transition-all">
                         <RefreshCcw className="w-4 h-4" /> RESET
                       </button>
                     )}
@@ -223,10 +251,9 @@ export default function Page() {
                 </div>
               </div>
 
-              {/* ── 결과 패널 ── */}
+              {/* 결과 패널 */}
               <div className="lg:col-span-8 space-y-6">
-
-                {/* 요약 카드 */}
+                {/* 요약 */}
                 <div className="bg-white border border-slate-200 rounded-[2.5rem] p-8 shadow-xl shadow-slate-200/50">
                   <div className="flex items-center gap-6">
                     <div className="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center text-red-500">
@@ -240,12 +267,12 @@ export default function Page() {
                           <div className="text-3xl font-black text-slate-800">{totalQty.toLocaleString()}</div>
                         </div>
                         <div>
-                          <div className="text-[9px] font-bold text-slate-400 uppercase mb-1">Extracted Lines</div>
-                          <div className="text-3xl font-black text-red-600">{rows.length.toLocaleString()}</div>
+                          <div className="text-[9px] font-bold text-slate-400 uppercase mb-1">DB Matched</div>
+                          <div className="text-3xl font-black text-red-600">{matchedQty.toLocaleString()}</div>
                         </div>
                       </div>
                     </div>
-                    {rows.length > 0 && (
+                    {items.length > 0 && totalQty === matchedQty && (
                       <div className="ml-auto flex flex-col items-end gap-1">
                         <div className="flex items-center gap-1.5 text-emerald-500 font-black text-xs">
                           <CheckCircle2 className="w-4 h-4" /> VERIFIED
@@ -256,7 +283,6 @@ export default function Page() {
                   </div>
                 </div>
 
-                {/* 에러 */}
                 {error && (
                   <div className="bg-red-50 border border-red-100 rounded-2xl p-5 flex items-center gap-3 text-red-600 font-semibold text-sm">
                     <AlertCircle className="w-5 h-5 flex-shrink-0" /> {error}
@@ -270,11 +296,8 @@ export default function Page() {
                       <TrendingUp className="w-4 h-4 text-red-500" />
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">China Production Stream</span>
                     </div>
-                    {rows.length > 0 && (
-                      <span className="text-[10px] font-bold text-slate-400">{rows.length}개 항목</span>
-                    )}
+                    {items.length > 0 && <span className="text-[10px] font-bold text-slate-400">{items.length}개 항목</span>}
                   </div>
-
                   <table className="w-full text-left">
                     <thead>
                       <tr className="border-b border-slate-50">
@@ -284,39 +307,37 @@ export default function Page() {
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.length === 0 ? (
-                        <tr>
-                          <td colSpan={4} className="px-8 py-32 text-center text-slate-300 text-sm font-bold uppercase tracking-widest">
-                            좌측에서 패킹리스트 파일을 업로드하세요
+                      {items.length === 0 ? (
+                        <tr><td colSpan={4} className="px-8 py-32 text-center text-slate-300 text-sm font-bold uppercase tracking-widest">좌측에서 패킹리스트 파일을 업로드하세요</td></tr>
+                      ) : items.map((item, idx) => (
+                        <tr key={item.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors group">
+                          <td className="px-8 py-5">
+                            <span className={`text-sm font-bold ${item.isMatched ? 'text-slate-700' : 'text-red-400'}`}>
+                              {item.isMatched ? item.matchedCode : '미매칭'}
+                            </span>
+                          </td>
+                          <td className="px-8 py-5">
+                            <div className="inline-block px-2 py-0.5 bg-red-50 text-red-400 text-[9px] font-black rounded mb-1 uppercase">REF: {item.style}</div>
+                            <div className="text-base font-black text-slate-800 leading-tight">{item.matchedName}</div>
+                            <div className="text-[10px] text-slate-400 font-medium mt-0.5 uppercase">{item.size} / {item.color || '-'}</div>
+                          </td>
+                          <td className="px-8 py-5"><span className="text-lg font-black text-slate-700">{item.qty}</span></td>
+                          <td className="px-8 py-5">
+                            <div className="flex items-center gap-2">
+                              {item.isMatched
+                                ? <div className="w-7 h-7 rounded-full border border-emerald-200 flex items-center justify-center text-emerald-500"><CheckCircle2 className="w-4 h-4" /></div>
+                                : <div className="w-7 h-7 rounded-full border border-red-200 flex items-center justify-center text-red-400"><AlertCircle className="w-4 h-4" /></div>
+                              }
+                              <button
+                                onClick={() => { setEditIdx(idx); setModalOpen(true); setSearchTerm(''); setSearchResults([]); }}
+                                className="w-7 h-7 rounded-full border border-slate-200 flex items-center justify-center text-slate-300 hover:border-blue-300 hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
-                      ) : (
-                        rows.map(row => (
-                          <tr key={row.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
-                            <td className="px-8 py-5 text-sm font-bold text-slate-400">미매칭</td>
-                            <td className="px-8 py-5">
-                              <div className="inline-block px-2 py-0.5 bg-red-50 text-red-400 text-[9px] font-black rounded mb-1 uppercase">
-                                REF: {row.name}
-                              </div>
-                              <div className="text-base font-black text-slate-800 leading-tight">{row.name}</div>
-                              <div className="text-[10px] text-slate-400 font-medium mt-0.5 uppercase">{row.size} / {row.color || '-'}</div>
-                            </td>
-                            <td className="px-8 py-5">
-                              <span className="text-lg font-black text-slate-700">{row.qty}</span>
-                            </td>
-                            <td className="px-8 py-5">
-                              <div className="flex items-center gap-2">
-                                <button className="w-7 h-7 rounded-full border border-slate-200 flex items-center justify-center text-slate-300 hover:border-red-300 hover:text-red-500 transition-colors">
-                                  <CheckCircle2 className="w-4 h-4" />
-                                </button>
-                                <button className="w-7 h-7 rounded-full border border-slate-200 flex items-center justify-center text-slate-300 hover:border-slate-400 transition-colors">
-                                  ×
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))
-                      )}
+                      ))}
                     </tbody>
                   </table>
                 </div>
@@ -325,6 +346,50 @@ export default function Page() {
           </div>
         </section>
       </div>
+
+      {/* 수동 매칭 모달 */}
+      {modalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={() => setModalOpen(false)} />
+          <div className="relative bg-white rounded-3xl p-10 max-w-lg w-full shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-300">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">수동 상품 매칭</h3>
+                {editIdx !== null && <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">REF: {items[editIdx]?.style}</p>}
+              </div>
+              <button onClick={() => setModalOpen(false)} className="w-10 h-10 rounded-2xl bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="relative mb-4">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text" value={searchTerm} onChange={e => handleSearch(e.target.value)}
+                placeholder="상품명, 상품코드, 옵션 검색..."
+                className="w-full pl-12 pr-4 py-4 rounded-2xl border border-slate-200 bg-slate-50 font-semibold text-sm focus:outline-none focus:border-red-300 focus:bg-white transition-all"
+                autoFocus
+              />
+            </div>
+            <div className="max-h-80 overflow-y-auto space-y-2">
+              {searchLoading ? (
+                <div className="flex items-center justify-center py-10 text-slate-400"><Loader2 className="w-5 h-5 animate-spin mr-2" /> 검색 중...</div>
+              ) : searchResults.length === 0 ? (
+                <div className="text-center py-10 text-slate-300 text-sm font-bold uppercase tracking-widest">{searchTerm.length < 2 ? '검색어를 입력하세요' : '검색 결과 없음'}</div>
+              ) : searchResults.map((r, i) => (
+                <button key={i} onClick={() => selectProduct(r)}
+                  className="w-full text-left p-4 rounded-2xl border border-slate-100 hover:border-red-200 hover:bg-red-50/50 transition-all group"
+                >
+                  <div className="font-black text-slate-800 group-hover:text-red-600 transition-colors">{r.matchedName}</div>
+                  <div className="flex gap-3 mt-1">
+                    <span className="text-[10px] font-bold text-blue-500 uppercase">{r.productCode}</span>
+                    {r.option && <span className="text-[10px] font-bold text-slate-400 uppercase">{r.option}</span>}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
