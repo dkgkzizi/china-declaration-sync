@@ -45,22 +45,41 @@ export default function Page() {
 
       for (let r = 0; r < raw.length; r++) {
         const rowStr = raw[r].map((c: any) => String(c ?? '').trim());
-        const nameIdx = rowStr.indexOf('품명');
+        const nameIdx = rowStr.findIndex((c: string) => c === '품명' || c === 'ITEM' || c === '품 명' || c.includes('품명'));
         if (nameIdx !== -1) {
           headerRowIdx = r; nameCol = nameIdx;
-          colorCol = rowStr.findIndex((c: string) => c === '칼라' || c === '색상');
+          colorCol = rowStr.findIndex((c: string) => c.includes('칼라') || c.includes('색상') || c.includes('COLOR'));
+
+          // 1. 현재 행에서 사이즈 컬럼(숫자 또는 S/M/L) 찾기
           for (let c = nameIdx + 1; c < rowStr.length; c++) {
-            const v = rowStr[c];
+            const v = String(rowStr[c] ?? '').trim();
+            if (!v) continue;
             if (/^\d{2,3}$/.test(v) || ['S','M','L','XL','FREE'].includes(v.toUpperCase())) {
               if (sizeStartCol === -1) sizeStartCol = c;
               sizeLabels.push(v);
+            }
+          }
+
+          // 2. 현재 행에서 사이즈를 못 찾았다면, 다음 행 확인 (2줄 병합 헤더인 경우)
+          if (sizeStartCol === -1 && r + 1 < raw.length) {
+            const nextRowStr = raw[r + 1].map((c: any) => String(c ?? '').trim());
+            for (let c = 0; c < nextRowStr.length; c++) {
+              const v = String(nextRowStr[c] ?? '').trim();
+              if (!v) continue;
+              if (/^\d{2,3}$/.test(v) || ['S','M','L','XL','FREE'].includes(v.toUpperCase())) {
+                if (sizeStartCol === -1) sizeStartCol = c;
+                sizeLabels.push(v);
+              }
+            }
+            if (sizeStartCol !== -1) {
+              headerRowIdx = r + 1; // 데이터는 다음 행부터 시작
             }
           }
           break;
         }
       }
 
-      if (headerRowIdx === -1) throw new Error('"품명" 컬럼을 찾지 못했습니다.');
+      if (headerRowIdx === -1) throw new Error('"품명" 컬럼을 찾지 못했습니다. 엑셀 형식을 확인해주세요.');
 
       const extracted: any[] = [];
       for (let r = headerRowIdx + 1; r < raw.length; r++) {
