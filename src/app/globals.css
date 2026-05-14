@@ -3,129 +3,134 @@
 @tailwind utilities;
 
 :root {
-  --bg: #030711;
-  --fg: #ffffff;
+  --bg: #020617;
+  --fg: #f8fafc;
   --accent: #3b82f6;
-  --accent-glow: rgba(59, 130, 246, 0.3);
-  --card-bg: rgba(13, 20, 38, 0.4);
-  --card-border: rgba(255, 255, 255, 0.06);
+  --accent-glow: rgba(59, 130, 246, 0.2);
+  --border: rgba(255, 255, 255, 0.05);
 }
 
-@layer base {
-  body {
-    @apply bg-[#030711] text-white antialiased selection:bg-blue-500/30;
-    font-family: 'Inter', -apple-system, sans-serif;
-  }
+body {
+  background-color: var(--bg);
+  color: var(--fg);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Aurora Background */
+/* Aurora Backdrop */
 .aurora {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  top: 0; left: 0; width: 100%; height: 100%;
   z-index: -1;
-  background: radial-gradient(circle at 0% 0%, #0d1632 0%, transparent 50%),
+  background: radial-gradient(circle at 0% 0%, #0f172a 0%, transparent 50%),
               radial-gradient(circle at 100% 100%, #1e1b4b 0%, transparent 50%),
-              radial-gradient(circle at 50% 50%, #030711 0%, transparent 100%);
-  overflow: hidden;
+              radial-gradient(circle at 50% 50%, #020617 0%, transparent 100%);
 }
 
-.aurora::after {
-  content: "";
-  position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background-image: url("https://grainy-gradients.vercel.app/noise.svg");
-  opacity: 0.15;
-  pointer-events: none;
-}
-
-/* Glass Card with Hover Glow */
+/* Glass Cards */
 .hyper-card {
-  @apply relative overflow-hidden rounded-[2rem] border border-white/5 bg-white/[0.02] backdrop-blur-3xl transition-all duration-500;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border);
+  border-radius: 2rem;
+  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .hyper-card:hover {
-  @apply border-white/10 bg-white/[0.04] -translate-y-1;
-  box-shadow: 0 0 40px -10px var(--accent-glow);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+  transform: translateY(-4px);
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.5);
 }
 
-.hyper-card::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: radial-gradient(800px circle at var(--mouse-x) var(--mouse-y), rgba(255, 255, 255, 0.06), transparent 40%);
-  opacity: 0;
-  transition: opacity 0.5s;
-}
-
-.hyper-card:hover::before {
-  opacity: 1;
-}
-
-/* Typography */
+/* Text & Headings */
 .text-gradient {
-  @apply bg-gradient-to-b from-white to-white/50 bg-clip-text text-transparent;
+  background: linear-gradient(to bottom, #ffffff 0%, rgba(255, 255, 255, 0.6) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .title-hero {
-  @apply text-6xl font-black tracking-tight leading-[0.9] lg:text-8xl;
+  font-size: clamp(3rem, 10vw, 8rem);
+  font-weight: 900;
+  letter-spacing: -0.05em;
+  line-height: 0.85;
 }
 
-/* Custom Table */
+/* Table Style */
 .custom-table {
-  @apply w-full border-separate border-spacing-y-2;
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 10px;
 }
 
 .custom-table th {
-  @apply px-6 py-4 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500;
+  padding: 1rem 1.5rem;
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: #64748b;
 }
 
-.custom-table tr td {
-  @apply bg-white/[0.02] py-5 px-6 first:rounded-l-2xl last:rounded-r-2xl border-y border-white/[0.02] first:border-l last:border-r transition-all duration-300;
+.custom-table td {
+  padding: 1.25rem 1.5rem;
+  background: rgba(255, 255, 255, 0.02);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
+
+.custom-table td:first-child { border-left: 1px solid var(--border); border-top-left-radius: 1rem; border-bottom-left-radius: 1rem; }
+.custom-table td:last-child { border-right: 1px solid var(--border); border-top-right-radius: 1rem; border-bottom-right-radius: 1rem; }
 
 .custom-table tr:hover td {
-  @apply bg-white/[0.05] border-white/10;
-}
-
-/* Status Badges */
-.badge-success {
-  @apply inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-[10px] font-bold text-emerald-500 border border-emerald-500/20;
-}
-
-.badge-warning {
-  @apply inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-3 py-1 text-[10px] font-bold text-amber-500 border border-amber-500/20;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
 /* Buttons */
 .btn-hyper {
-  @apply relative flex items-center justify-center gap-2 overflow-hidden rounded-2xl bg-white px-8 py-4 text-sm font-bold text-black transition-all duration-300 hover:scale-[1.02] active:scale-[0.98];
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1rem 2rem;
+  background: #ffffff;
+  color: #000000;
+  font-weight: 800;
+  font-size: 0.875rem;
+  border-radius: 1rem;
+  transition: all 0.3s;
 }
 
 .btn-hyper:hover {
-  @apply shadow-[0_0_30px_rgba(255,255,255,0.3)];
+  transform: scale(1.03);
+  box-shadow: 0 0 30px rgba(255, 255, 255, 0.2);
 }
 
-/* Input Fields */
-.input-hyper {
-  @apply w-full rounded-2xl border border-white/5 bg-white/[0.03] p-4 text-lg font-bold text-white outline-none transition-all duration-300 focus:border-blue-500/50 focus:bg-white/[0.05];
+/* Badges */
+.badge-success {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: 9999px;
+  font-size: 0.65rem;
+  font-weight: 800;
 }
 
-/* Animations */
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-10px); }
-}
-
-.animate-float {
-  animation: float 5s ease-in-out infinite;
+.badge-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 9999px;
+  font-size: 0.65rem;
+  font-weight: 800;
 }
