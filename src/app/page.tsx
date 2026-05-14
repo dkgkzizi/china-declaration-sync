@@ -16,7 +16,10 @@ import {
   Database,
   ArrowRight,
   History,
-  LayoutDashboard
+  LayoutDashboard,
+  Loader2,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import * as XLSX from 'xlsx'
@@ -26,13 +29,16 @@ import { supabase } from '@/lib/supabase'
 
 interface PackingItem {
   id: string;
-  name: string;
+  style: string;
+  matchedCode: string;
+  matchedName: string;
   color: string;
   size: string;
   qty: number;
   unitPriceCNY: number;
   landedCostKRW: number;
   totalCostKRW: number;
+  originSheet?: string;
 }
 
 export default function Home() {
@@ -96,75 +102,104 @@ export default function Home() {
     e.preventDefault();
     setIsDragging(false);
     const f = e.dataTransfer.files?.[0];
-    if (f) handleFile(f);
+    if (f) handleProcess(f);
   };
 
-  const handleFile = async (f: File) => {
+  const handleProcess = async (f: File) => {
     setFile(f);
     setLoading(true);
+    setItems([]);
+    
     try {
       const buffer = await f.arrayBuffer();
       const workbook = XLSX.read(buffer, { type: 'array' });
-      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-      const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as any[][];
       
-      const extracted: PackingItem[] = [];
-      let nameCol = -1, colorCol = -1, qtyCol = -1, priceCol = -1;
+      let clientExtractedData: any[] = [];
+      const targetSheets = workbook.SheetNames.filter(name => 
+          name.includes('OZ') || name.includes('OH') || name.includes('오즈') || name.includes('매칭') || name.includes('패킹')
+      );
+      
+      const sheetsToProcess = targetSheets.length > 0 ? targetSheets : [workbook.SheetNames[0]];
 
-      jsonData.forEach((row) => {
-        if (nameCol !== -1) return;
-        const rowStr = row.map(c => String(c || "").trim()).join("|");
-        if (rowStr.includes("품명") || rowStr.includes("ITEM") || rowStr.includes("상품명")) {
-          row.forEach((cell, cIdx) => {
-            const c = String(cell || "").trim();
-            if (c.includes("품명") || c.includes("ITEM") || c.includes("상품명")) nameCol = cIdx;
-            if (c.includes("색상") || c.includes("칼라") || c.includes("COLOR")) colorCol = cIdx;
-            if (c.includes("수량") || c.includes("QTY") || c.includes("합계")) qtyCol = cIdx;
-            if (c.includes("단가") || c.includes("PRICE") || c.includes("CNY")) priceCol = cIdx;
+      sheetsToProcess.forEach(sheetName => {
+          const worksheet = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+          if (jsonData.length === 0) return;
+
+          let nameCol = -1, colorCol = -1, totalCol = -1, sizeStartCol = -1, priceCol = -1;
+          
+          jsonData.forEach((row, idx) => {
+              if (nameCol !== -1) return;
+              const rowStr = row.map(c => String(c || "").trim()).join("|");
+              if (rowStr.includes('품명') && (rowStr.includes('합계') || rowStr.includes('수량'))) {
+                  row.forEach((cell, cellIdx) => {
+                      const c = String(cell || "").trim().toUpperCase();
+                      if (c === '품명' || c.includes('ITEM')) nameCol = cellIdx;
+                      else if (c === '칼라' || c === '색상' || c === 'COLOR') colorCol = cellIdx;
+                      else if (c === '합계' || c === '총계' || c === '수량' || c === 'TOTAL') totalCol = cellIdx;
+                      else if (c === '사이즈' || c === 'SIZE') sizeStartCol = cellIdx;
+                      else if (c.includes('단가') || c.includes('PRICE') || c.includes('CNY')) priceCol = cellIdx;
+                  });
+              }
           });
-        }
+
+          if (nameCol === -1) return;
+
+          const startIdx = jsonData.findIndex(row => row.map(c => String(c || "").trim()).join("|").includes('품명')) + 1;
+          
+          for (let i = startIdx; i < jsonData.length; i++) {
+              const row = jsonData[i];
+              if (!row || !Array.isArray(row)) continue;
+              
+              const name = String(row[nameCol] || "").trim();
+              const qty = parseInt(String(row[totalCol] || "0").replace(/[^0-9]/g, ''));
+              const price = parseFloat(String(row[priceCol] || "0").replace(/[^0-9.]/g, '')) || 0;
+
+              if (name && qty > 0) {
+                  clientExtractedData.push({
+                      id: Math.random().toString(36).substr(2, 9),
+                      style: name,
+                      name: name,
+                      color: colorCol !== -1 ? String(row[colorCol] || "").trim() : "-",
+                      size: sizeStartCol !== -1 ? String(row[sizeStartCol] || "FREE").trim() : "FREE",
+                      qty: qty,
+                      unitPriceCNY: price,
+                      originSheet: sheetName
+                  });
+              }
+          }
       });
 
-      const startIdx = jsonData.findIndex(row => row.map(c => String(c || "").trim()).join("|").includes("품명")) + 1;
+      if (clientExtractedData.length === 0) {
+          throw new Error("유효한 데이터를 찾지 못했습니다.");
+      }
+
+      // 2. 서버 매칭 API 호출
+      const res = await fetch('/api/china/convert', { 
+          method: 'POST', 
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: clientExtractedData, fileName: f.name })
+      });
       
-      for (let i = startIdx; i < jsonData.length; i++) {
-        const row = jsonData[i];
-        const name = String(row[nameCol] || "").trim();
-        const qty = parseInt(String(row[qtyCol] || "0").replace(/[^0-9]/g, ''));
-        const price = parseFloat(String(row[priceCol] || "0").replace(/[^0-9.]/g, ''));
-
-        if (name && qty > 0) {
-          extracted.push({
-            id: Math.random().toString(36).substr(2, 9),
-            name,
-            color: colorCol !== -1 ? String(row[colorCol] || "").trim() : "-",
-            size: "-",
-            qty,
-            unitPriceCNY: price || 0,
-            landedCostKRW: 0,
-            totalCostKRW: 0
-          });
-        }
+      const data = await res.json();
+      if (data.success) {
+          setItems(data.items);
+          
+          if (dbStatus === 'connected') {
+            const { data: newLog } = await supabase.from('upload_logs').insert({
+                file_name: f.name,
+                item_count: data.items.length,
+                total_qty: data.items.reduce((acc: number, i: any) => acc + i.qty, 0)
+            }).select().single();
+            if (newLog) setLogs([newLog, ...logs.slice(0, 4)]);
+          }
+      } else {
+          alert(`작업 실패: ${data.message}`);
       }
-
-      setItems(extracted);
-
-      if (dbStatus === 'connected') {
-        const { data: newLog } = await supabase.from('upload_logs').insert({
-            file_name: f.name,
-            item_count: extracted.length,
-            total_qty: extracted.reduce((acc, i) => acc + i.qty, 0)
-        }).select().single();
-        
-        if (newLog) setLogs([newLog, ...logs.slice(0, 4)]);
-      }
-
-    } catch (err) {
-      console.error(err);
-      alert("파일 파싱 중 오류가 발생했습니다.");
-    } finally {
-      setLoading(false);
-    }
+    } catch (e: any) { 
+      console.error(e);
+      alert(e.message || '처리 중 오류가 발생했습니다.'); 
+    } finally { setLoading(false); }
   };
 
   const handleExport = async () => {
@@ -172,12 +207,14 @@ export default function Home() {
     const worksheet = workbook.addWorksheet('신고단가결과');
 
     worksheet.columns = [
-      { header: '상품명', key: 'name', width: 30 },
+      { header: '상품코드', key: 'matchedCode', width: 20 },
+      { header: '상품명', key: 'matchedName', width: 40 },
       { header: '색상', key: 'color', width: 15 },
+      { header: '사이즈', key: 'size', width: 12 },
       { header: '수량', key: 'qty', width: 10 },
       { header: '신고단가(CNY)', key: 'unitPriceCNY', width: 15 },
       { header: '원화환산가(KRW)', key: 'landedCostKRW', width: 15 },
-      { header: '신고합계(KRW)', key: 'totalCostKRW', width: 20 },
+      { header: '합계(KRW)', key: 'totalCostKRW', width: 20 },
     ];
 
     items.forEach(item => worksheet.addRow(item));
@@ -236,7 +273,7 @@ export default function Home() {
               </h1>
               <p className="text-slate-400 text-lg max-w-xl leading-relaxed">
                 중국 패킹리스트에서 세관 신고용 단가를 자동으로 추출하고 관리하세요. 
-                복잡한 엑셀 수식 없이 1초 만에 원화 환산 및 세금 계산이 완료됩니다.
+                Supabase 제품 데이터베이스와 실시간으로 매칭됩니다.
               </p>
             </div>
             
@@ -278,16 +315,20 @@ export default function Home() {
                   type="file" 
                   ref={fileInputRef} 
                   className="hidden" 
-                  onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+                  onChange={(e) => e.target.files?.[0] && handleProcess(e.target.files[0])}
                   accept=".xlsx, .xls"
                 />
                 <div className="flex flex-col items-center gap-6">
-                  <div className="w-20 h-20 rounded-3xl bg-blue-500/10 text-blue-500 flex items-center justify-center floating">
-                    <FileUp className="w-10 h-10" />
-                  </div>
+                  {loading ? (
+                    <Loader2 className="w-16 h-16 text-blue-500 animate-spin" />
+                  ) : (
+                    <div className="w-20 h-20 rounded-3xl bg-blue-500/10 text-blue-500 flex items-center justify-center floating">
+                      <FileUp className="w-10 h-10" />
+                    </div>
+                  )}
                   <div>
-                    <h3 className="text-2xl font-bold mb-2">파일을 업로드하세요</h3>
-                    <p className="text-slate-500">엑셀 파일을 드래그하거나 클릭하여 시작하세요</p>
+                    <h3 className="text-2xl font-bold mb-2">중국 패킹리스트 업로드</h3>
+                    <p className="text-slate-500">DB 상품 매칭과 단가 추출을 한 번에 시작하세요</p>
                   </div>
                 </div>
               </motion.div>
@@ -317,7 +358,7 @@ export default function Home() {
                 <div className="flex justify-between items-center">
                   <h2 className="text-xl font-bold flex items-center gap-3">
                     <div className="w-2 h-8 bg-blue-500 rounded-full" />
-                    추출 결과 데이터
+                    매칭 완료 데이터
                   </h2>
                   <div className="flex gap-3">
                     <button className="glass-card px-6 py-3 flex items-center gap-2 text-sm font-bold" onClick={() => { setFile(null); setItems([]); }}>
@@ -334,10 +375,10 @@ export default function Home() {
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-white/[0.02]">
-                        <th className="p-5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">상품 정보</th>
-                        <th className="p-5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">색상</th>
+                        <th className="p-5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">매칭 상품 정보</th>
+                        <th className="p-5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">원래 스타일</th>
+                        <th className="p-5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">색상/사이즈</th>
                         <th className="p-5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">수량</th>
-                        <th className="p-5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">단가 (CNY)</th>
                         <th className="p-5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">환산가 (KRW)</th>
                         <th className="p-5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">합계 (KRW)</th>
                       </tr>
@@ -353,12 +394,26 @@ export default function Home() {
                             className="table-row"
                           >
                             <td className="p-5">
-                              <div className="font-bold text-slate-200">{item.name}</div>
-                              <div className="text-[10px] text-slate-500 mt-1 uppercase">Ref: {item.id.slice(0, 4)}</div>
+                              <div className="flex items-center gap-2">
+                                {(item as any).isMatched ? (
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                                ) : (
+                                    <AlertCircle className="w-3 h-3 text-amber-500" />
+                                )}
+                                <div className="font-bold text-slate-200">{item.matchedName}</div>
+                              </div>
+                              <div className="text-[10px] text-blue-500 mt-1 uppercase font-bold">{item.matchedCode}</div>
                             </td>
-                            <td className="p-5"><span className="px-3 py-1 rounded-lg bg-white/5 text-slate-400 text-[11px] font-bold border border-white/5">{item.color}</span></td>
+                            <td className="p-5">
+                                <div className="text-xs text-slate-500">{item.style}</div>
+                            </td>
+                            <td className="p-5">
+                                <div className="flex gap-2">
+                                    <span className="px-2 py-0.5 rounded bg-white/5 text-slate-400 text-[10px] font-bold">{item.color}</span>
+                                    <span className="px-2 py-0.5 rounded bg-white/5 text-slate-400 text-[10px] font-bold">{item.size}</span>
+                                </div>
+                            </td>
                             <td className="p-5 font-medium">{item.qty.toLocaleString()}</td>
-                            <td className="p-5 text-slate-400">¥ {item.unitPriceCNY.toFixed(2)}</td>
                             <td className="p-5">
                                <div className="text-blue-400 font-bold">₩ {item.landedCostKRW.toLocaleString()}</div>
                             </td>
@@ -397,21 +452,6 @@ export default function Home() {
                   </div>
                 )}
               </div>
-              <button className="w-full mt-6 py-3 rounded-xl border border-white/5 text-[10px] font-bold text-slate-400 hover:bg-white/5 transition-all flex items-center justify-center gap-2">
-                View All Activity <ArrowRight className="w-3 h-3" />
-              </button>
-            </div>
-
-            <div className="glass-card p-6 overflow-hidden relative group">
-              <div className="relative z-10">
-                <h3 className="text-sm font-bold mb-2">Cloud Backup</h3>
-                <p className="text-xs text-slate-400 mb-4 leading-relaxed">모든 작업 내역은 Supabase 클라우드에 안전하게 보관됩니다.</p>
-                <div className="flex -space-x-2">
-                  {[1,2,3].map(i => <div key={i} className="w-6 h-6 rounded-full border-2 border-slate-900 bg-slate-800" />)}
-                  <div className="w-6 h-6 rounded-full border-2 border-slate-900 bg-blue-500 flex items-center justify-center text-[8px] font-bold">+12</div>
-                </div>
-              </div>
-              <div className="absolute -right-4 -bottom-4 w-24 h-24 bg-blue-500/10 blur-2xl rounded-full group-hover:bg-blue-500/20 transition-all" />
             </div>
           </aside>
         </section>
