@@ -1,277 +1,197 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react'
-import { 
-  FileUp, 
-  Download, 
-  RefreshCcw, 
-  CheckCircle2, 
-  AlertCircle,
-  Database,
-  ArrowRightLeft,
-  Printer,
-  FileSpreadsheet,
-  PackageCheck
-} from 'lucide-react'
-import { motion, AnimatePresence } from 'framer-motion'
-import * as XLSX from 'xlsx'
-import ExcelJS from 'exceljs'
-import { saveAs } from 'file-saver'
-import { supabase } from '@/lib/supabase'
+import { useState, useRef } from 'react';
+import * as XLSX from 'xlsx';
 
-interface PackingItem {
+interface RowItem {
   id: string;
-  style: string;
-  matchedCode: string;
-  matchedName: string;
+  name: string;
   color: string;
   size: string;
   qty: number;
-  isMatched?: boolean;
 }
 
 export default function Home() {
-  const [file, setFile] = useState<File | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [items, setItems] = useState<PackingItem[]>([])
-  const [dbStatus, setDbStatus] = useState<'connected' | 'disconnected' | 'idle'>('idle')
-  
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [fileName, setFileName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [rows, setRows] = useState<RowItem[]>([]);
+  const [error, setError] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    const checkConn = async () => {
-      try {
-        const { error } = await supabase.from('upload_logs').select('count', { count: 'exact', head: true });
-        if (error) throw error;
-        setDbStatus('connected');
-      } catch (err) { setDbStatus('disconnected'); }
-    };
-    checkConn();
-  }, []);
-
-  const handleProcess = async (f: File) => {
-    setFile(f);
+  const handleUpload = async (file: File) => {
+    setError('');
+    setRows([]);
+    setFileName(file.name);
     setLoading(true);
-    setItems([]);
-    
+
     try {
-      const buffer = await f.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: 'array' });
-      let extractedData: any[] = [];
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const raw = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
 
-      const targetSheet = workbook.Sheets[workbook.SheetNames[0]];
-      const jsonData = XLSX.utils.sheet_to_json(targetSheet, { header: 1 }) as any[][];
+      // 1) 헤더 행 찾기: "품명" 이 있는 행
+      let headerRowIdx = -1;
+      let nameCol = -1, colorCol = -1;
+      let sizeStartCol = -1;
+      let sizeLabels: string[] = [];
 
-      let nameCol = -1, colorCol = -1, sizeStartCol = -1, sizeEndCol = -1;
-      const sizeHeaderRow = jsonData.find(row => 
-        row.some(c => String(c || "").includes('사이즈별수량') || String(c || "").includes('품명'))
-      );
+      for (let r = 0; r < raw.length; r++) {
+        const row = raw[r];
+        const rowStr = row.map((c: any) => String(c ?? '').trim());
+        const nameIdx = rowStr.indexOf('품명');
+        if (nameIdx !== -1) {
+          headerRowIdx = r;
+          nameCol = nameIdx;
+          // 칼라 컬럼 찾기
+          const colorIdx = rowStr.findIndex((c: string) => c === '칼라' || c === '색상');
+          colorCol = colorIdx;
 
-      if (!sizeHeaderRow) throw new Error("유효한 패킹리스트 형식이 아닙니다.");
-
-      sizeHeaderRow.forEach((cell, idx) => {
-        const c = String(cell || "").trim();
-        if (c.includes('품명')) nameCol = idx;
-        if (c.includes('칼라') || c.includes('색상')) colorCol = idx;
-        // 사이즈 숫자가 시작되는 지점 찾기 (보통 90, 100... 또는 120, 130...)
-        if (!isNaN(parseInt(c)) && sizeStartCol === -1) sizeStartCol = idx;
-        if (sizeStartCol !== -1 && !isNaN(parseInt(c))) sizeEndCol = idx;
-        // S, M, L, FREE 등도 사이즈로 인식
-        if (['S', 'M', 'L', 'FREE'].includes(c.toUpperCase()) && sizeStartCol === -1) sizeStartCol = idx;
-        if (sizeStartCol !== -1 && ['S', 'M', 'L', 'FREE'].includes(c.toUpperCase())) sizeEndCol = idx;
-      });
-
-      const startIdx = jsonData.indexOf(sizeHeaderRow) + 1;
-      
-      for (let i = startIdx; i < jsonData.length; i++) {
-        const row = jsonData[i];
-        const name = String(row[nameCol] || "").trim();
-        const color = String(row[colorCol] || "").trim();
-
-        if (name && name !== '합계' && color) {
-          for (let sIdx = sizeStartCol; sIdx <= sizeEndCol; sIdx++) {
-            const qty = parseInt(String(row[sIdx] || "0").replace(/[^0-9]/g, ''));
-            const sizeLabel = String(sizeHeaderRow[sIdx] || "").trim();
-
-            if (qty > 0) {
-              extractedData.push({
-                id: Math.random().toString(36).substr(2, 9),
-                style: name,
-                color: color,
-                size: sizeLabel,
-                qty: qty
-              });
+          // 사이즈 컬럼 찾기 (숫자 or S/M/L/FREE)
+          for (let c = nameIdx + 1; c < rowStr.length; c++) {
+            const v = rowStr[c];
+            if (/^\d{2,3}$/.test(v) || ['S','M','L','XL','FREE'].includes(v.toUpperCase())) {
+              if (sizeStartCol === -1) sizeStartCol = c;
+              sizeLabels.push(v);
             }
+          }
+          break;
+        }
+      }
+
+      if (headerRowIdx === -1 || nameCol === -1) {
+        setError('엑셀에서 "품명" 컬럼을 찾지 못했습니다. 파일 형식을 확인해주세요.');
+        setLoading(false);
+        return;
+      }
+
+      // 2) 데이터 행 파싱
+      const result: RowItem[] = [];
+      for (let r = headerRowIdx + 1; r < raw.length; r++) {
+        const row = raw[r];
+        const name = String(row[nameCol] ?? '').trim();
+        const color = colorCol >= 0 ? String(row[colorCol] ?? '').trim() : '';
+
+        if (!name) continue;
+
+        if (sizeStartCol !== -1 && sizeLabels.length > 0) {
+          // 사이즈별 수량 파싱
+          sizeLabels.forEach((size, i) => {
+            const qty = parseInt(String(row[sizeStartCol + i] ?? '0').replace(/[^\d]/g, ''));
+            if (qty > 0) {
+              result.push({ id: `${r}-${i}`, name, color, size, qty });
+            }
+          });
+        } else {
+          // 합계 컬럼만 있는 경우
+          const totalCol = raw[headerRowIdx].findIndex((c: any) => String(c ?? '').includes('합계'));
+          const qty = parseInt(String(row[totalCol] ?? '0').replace(/[^\d]/g, ''));
+          if (qty > 0) {
+            result.push({ id: `${r}`, name, color, size: 'FREE', qty });
           }
         }
       }
 
-      // 서버 매칭 API 호출
-      const res = await fetch('/api/china/convert', { 
-          method: 'POST', 
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ items: extractedData, fileName: f.name })
-      });
-      const data = await res.json();
-      if (data.success) setItems(data.items);
-
-    } catch (e: any) { alert(e.message); }
-    finally { setLoading(false); }
+      if (result.length === 0) {
+        setError('데이터를 추출하지 못했습니다. 파일을 확인해주세요.');
+      } else {
+        setRows(result);
+      }
+    } catch (e: any) {
+      setError(`오류: ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const totalQty = items.reduce((acc, i) => acc + i.qty, 0);
+  const totalQty = rows.reduce((s, r) => s + r.qty, 0);
 
   return (
-    <div className="min-h-screen bg-[#F8F9FD] text-[#1A1C21] font-sans selection:bg-blue-500/10">
-      <div className="flex h-screen overflow-hidden">
-        
-        {/* LEFT SIDEBAR */}
-        <aside className="w-80 bg-white border-r border-slate-200 flex flex-col p-8 gap-10">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 bg-red-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-red-500/20">
-              <FileSpreadsheet className="w-6 h-6" />
-            </div>
-            <div>
-              <h1 className="text-xl font-black tracking-tight uppercase">China Sync</h1>
-              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Data Integrity v3.0</div>
-            </div>
+    <div className="min-h-screen p-8">
+      <div className="max-w-5xl mx-auto space-y-8">
+
+        {/* 헤더 */}
+        <div>
+          <h1 className="text-3xl font-black text-slate-800">중국 신고단가 추출</h1>
+          <p className="text-slate-500 mt-1">중국 패킹리스트 엑셀 파일을 업로드하면 상품 데이터를 자동으로 추출합니다.</p>
+        </div>
+
+        {/* 업로드 영역 */}
+        <div
+          onClick={() => fileRef.current?.click()}
+          className="bg-white rounded-2xl border-2 border-dashed border-slate-300 hover:border-blue-500 transition-colors cursor-pointer p-16 flex flex-col items-center gap-4"
+        >
+          <input
+            type="file"
+            ref={fileRef}
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={e => e.target.files?.[0] && handleUpload(e.target.files[0])}
+          />
+          {loading ? (
+            <p className="text-blue-500 font-bold text-lg animate-pulse">파일 분석 중...</p>
+          ) : (
+            <>
+              <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center text-3xl">📂</div>
+              <p className="text-xl font-bold text-slate-700">엑셀 파일 클릭하여 업로드</p>
+              <p className="text-sm text-slate-400">.xlsx 또는 .xls 파일 지원</p>
+              {fileName && <p className="text-sm text-blue-500 font-semibold">✓ {fileName}</p>}
+            </>
+          )}
+        </div>
+
+        {/* 에러 */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-red-600 font-semibold">
+            {error}
           </div>
+        )}
 
-          <div className="flex-1 space-y-6">
-             <div className="rounded-3xl border-2 border-dashed border-slate-200 p-8 flex flex-col items-center justify-center text-center gap-4 group hover:border-blue-500/50 transition-all cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-                <input type="file" ref={fileInputRef} className="hidden" onChange={(e) => e.target.files?.[0] && handleProcess(e.target.files[0])} />
-                <div className="w-16 h-16 rounded-2xl bg-slate-50 flex items-center justify-center group-hover:bg-blue-50 transition-colors">
-                  {loading ? <RefreshCcw className="w-8 h-8 text-blue-500 animate-spin" /> : <FileUp className="w-8 h-8 text-slate-400 group-hover:text-blue-500" />}
-                </div>
-                <div>
-                  <div className="font-bold text-sm">{file ? 'Excel Loaded' : 'Upload Excel'}</div>
-                  <div className="text-[10px] text-slate-400 font-medium mt-1 truncate w-40">{file ? file.name : 'Drag or Click'}</div>
-                </div>
-             </div>
-
-             <div className="space-y-3">
-                <button className="w-full py-4 px-6 rounded-2xl bg-[#1A1C21] text-white font-bold text-sm flex items-center justify-center gap-3 shadow-xl shadow-black/10 hover:scale-[1.02] transition-all">
-                  <ArrowRightLeft className="w-4 h-4" /> SYNC CHINA DATA
-                </button>
-                <button className="w-full py-4 px-6 rounded-2xl bg-red-500 text-white font-bold text-sm flex items-center justify-center gap-3 shadow-xl shadow-red-500/20 hover:scale-[1.02] transition-all uppercase">
-                  <Download className="w-4 h-4" /> Download Final Excel
-                </button>
-                <button className="w-full py-4 px-6 rounded-2xl bg-white border border-slate-200 text-[#1A1C21] font-bold text-sm flex items-center justify-center gap-3 hover:bg-slate-50 transition-all uppercase">
-                  <Printer className="w-4 h-4" /> Print Pallet Labels
-                </button>
-             </div>
-          </div>
-
-          <div className="flex items-center justify-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${dbStatus === 'connected' ? 'bg-emerald-500' : 'bg-red-500'}`} />
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">DB {dbStatus}</span>
-          </div>
-        </aside>
-
-        {/* MAIN CONTENT */}
-        <main className="flex-1 overflow-y-auto p-12 space-y-10">
-          
-          {/* HEADER SUMMARY */}
-          <section className="bg-white rounded-[2.5rem] p-10 border border-slate-200 shadow-sm flex items-center gap-12">
-            <div className="w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center text-red-500">
-               <ArrowRightLeft className="w-8 h-8" />
-            </div>
-            <div className="flex gap-16">
-              <div className="space-y-1">
-                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">China Integrity Summary</div>
-                <div className="flex gap-8 items-end">
-                   <div>
-                      <div className="text-[9px] font-bold text-red-400 uppercase mb-1">Original Qty</div>
-                      <div className="text-3xl font-black">{totalQty.toLocaleString()}</div>
-                   </div>
-                   <div>
-                      <div className="text-[9px] font-bold text-red-400 uppercase mb-1">DB Matched</div>
-                      <div className="text-3xl font-black text-red-500">{items.filter(i => i.isMatched).reduce((acc, i) => acc + i.qty, 0).toLocaleString()}</div>
-                   </div>
-                </div>
-              </div>
-            </div>
-            <div className="ml-auto flex flex-col items-end gap-2">
-              <div className="flex items-center gap-2 text-emerald-500 font-bold text-xs">
-                <CheckCircle2 className="w-4 h-4" /> VERIFIED
-              </div>
-              <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest italic">Factory-to-Cloud Stream...</div>
-            </div>
-          </section>
-
-          {/* LIST SECTION */}
-          <section className="space-y-6">
-            <div className="flex items-center justify-between px-4">
-              <div className="flex items-center gap-3">
-                <PackageCheck className="w-5 h-5 text-red-500" />
-                <span className="text-xs font-black text-slate-400 uppercase tracking-[0.3em]">China Production Stream</span>
-              </div>
-              <div className="flex gap-4">
-                <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400"><RefreshCcw className="w-4 h-4" /></div>
-                <button className="px-4 py-2 bg-red-50 text-red-500 text-[10px] font-black rounded-lg uppercase">오즈키즈</button>
+        {/* 결과 */}
+        {rows.length > 0 && (
+          <div className="space-y-4">
+            {/* 요약 */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-slate-800">추출 결과</h2>
+                <p className="text-sm text-slate-500">{fileName} · 총 {rows.length}행 · 합계 {totalQty.toLocaleString()}개</p>
               </div>
             </div>
 
-            <div className="bg-white rounded-[2rem] border border-slate-200 overflow-hidden shadow-sm">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-100">
-                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Master SKU</th>
-                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Detail Matrix</th>
-                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Qty Score</th>
-                    <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Valid</th>
+            {/* 테이블 */}
+            <div className="bg-white rounded-2xl overflow-hidden border border-slate-200">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th className="px-6 py-4 font-bold text-slate-600 uppercase text-xs tracking-wider">#</th>
+                    <th className="px-6 py-4 font-bold text-slate-600 uppercase text-xs tracking-wider">품명</th>
+                    <th className="px-6 py-4 font-bold text-slate-600 uppercase text-xs tracking-wider">색상</th>
+                    <th className="px-6 py-4 font-bold text-slate-600 uppercase text-xs tracking-wider">사이즈</th>
+                    <th className="px-6 py-4 font-bold text-slate-600 uppercase text-xs tracking-wider text-right">수량</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <AnimatePresence>
-                    {items.length > 0 ? items.map((item, idx) => (
-                      <motion.tr 
-                        key={item.id}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: idx * 0.01 }}
-                        className="group hover:bg-slate-50/50 transition-colors border-b border-slate-50 last:border-0"
-                      >
-                        <td className="px-10 py-8">
-                          <div className={`text-sm font-bold ${item.isMatched ? 'text-slate-700' : 'text-slate-400'}`}>
-                            {item.isMatched ? item.matchedCode : '미매칭'}
-                          </div>
-                        </td>
-                        <td className="px-10 py-8">
-                          <div className="space-y-1">
-                            <div className="inline-block px-2 py-0.5 bg-red-50 text-red-500 text-[9px] font-black rounded uppercase">Ref: {item.style}</div>
-                            <div className="text-lg font-black text-slate-800 tracking-tight">{item.isMatched ? item.matchedName : item.style}</div>
-                            <div className="text-[10px] font-bold text-slate-400 uppercase">{item.size} / {item.color}</div>
-                          </div>
-                        </td>
-                        <td className="px-10 py-8 text-center">
-                          <div className="text-lg font-black text-slate-800">{item.qty}</div>
-                        </td>
-                        <td className="px-10 py-8">
-                          <div className="flex justify-end gap-3">
-                             <div className={`w-8 h-8 rounded-full flex items-center justify-center border ${item.isMatched ? 'border-emerald-100 text-emerald-500' : 'border-red-100 text-red-500'}`}>
-                                {item.isMatched ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-                             </div>
-                             <div className="w-8 h-8 rounded-full flex items-center justify-center border border-slate-100 text-slate-300">
-                                <RefreshCcw className="w-4 h-4" />
-                             </div>
-                          </div>
-                        </td>
-                      </motion.tr>
-                    )) : (
-                      <tr>
-                        <td colSpan={4} className="py-40 text-center">
-                          <div className="text-slate-300 font-bold text-sm uppercase tracking-widest">No Data Available</div>
-                        </td>
-                      </tr>
-                    )}
-                  </AnimatePresence>
+                  {rows.map((row, idx) => (
+                    <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                      <td className="px-6 py-3 text-slate-400 text-xs">{idx + 1}</td>
+                      <td className="px-6 py-3 font-semibold text-slate-800">{row.name}</td>
+                      <td className="px-6 py-3 text-slate-600">{row.color || '-'}</td>
+                      <td className="px-6 py-3 text-slate-600">{row.size}</td>
+                      <td className="px-6 py-3 text-right font-bold text-blue-600">{row.qty.toLocaleString()}</td>
+                    </tr>
+                  ))}
                 </tbody>
+                <tfoot>
+                  <tr className="bg-slate-50 border-t border-slate-200">
+                    <td colSpan={4} className="px-6 py-4 font-bold text-slate-700 text-right">합계</td>
+                    <td className="px-6 py-4 font-black text-blue-700 text-right">{totalQty.toLocaleString()}</td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
-          </section>
-        </main>
+          </div>
+        )}
       </div>
     </div>
-  )
+  );
 }
