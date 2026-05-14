@@ -417,31 +417,32 @@ export default function Page() {
                     </div>
                     {items.length > 0 && <span className="text-[10px] font-bold text-slate-400">{items.length}개 항목</span>}
                   </div>
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="border-b border-slate-50">
-                        {['Master SKU', 'Detail Matrix', 'Qty Score', 'Valid'].map(h => (
-                          <th key={h} className="px-8 py-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {items.length === 0 ? (
-                        <tr><td colSpan={4} className="px-8 py-32 text-center text-slate-300 text-sm font-bold uppercase tracking-widest">좌측에서 패킹리스트 파일을 업로드하세요</td></tr>
-                      ) : items.map((item, idx) => (
-                        <tr key={item.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors group">
-                          <td className="px-8 py-5">
-                            <span className={`text-sm font-bold ${item.isMatched ? 'text-slate-700' : 'text-red-400'}`}>
-                              {item.isMatched ? item.matchedCode : '미매칭'}
-                            </span>
-                          </td>
-                          <td className="px-8 py-5">
-                            <div className="inline-block px-2 py-0.5 bg-red-50 text-red-400 text-[9px] font-black rounded mb-1 uppercase">REF: {item.style}</div>
-                            <div className="text-base font-black text-slate-800 leading-tight">{item.matchedName}</div>
-                            <div className="text-[10px] text-slate-400 font-medium mt-0.5 uppercase">{item.size} / {item.color || '-'}</div>
-                          </td>
-                          <td className="px-8 py-5"><span className="text-lg font-black text-slate-700">{item.qty}</span></td>
-                          <td className="px-8 py-5">
+                  <div className="max-h-[600px] overflow-y-auto relative styled-scrollbar">
+                    <table className="w-full text-left">
+                      <thead className="sticky top-0 bg-white/95 backdrop-blur-sm z-10 shadow-sm border-b border-slate-100">
+                        <tr>
+                          {['Master SKU', 'Detail Matrix', 'Qty Score', 'Valid'].map(h => (
+                            <th key={h} className="px-6 py-3 text-[9px] font-black text-slate-400 uppercase tracking-widest">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {items.length === 0 ? (
+                          <tr><td colSpan={4} className="px-6 py-32 text-center text-slate-300 text-sm font-bold uppercase tracking-widest">좌측에서 패킹리스트 파일을 업로드하세요</td></tr>
+                        ) : items.map((item, idx) => (
+                          <tr key={item.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors group">
+                            <td className="px-6 py-3">
+                              <span className={`text-sm font-bold ${item.isMatched ? 'text-slate-700' : 'text-red-400'}`}>
+                                {item.isMatched ? item.matchedCode : '미매칭'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-3">
+                              <div className="inline-block px-2 py-0.5 bg-red-50 text-red-400 text-[9px] font-black rounded mb-1 uppercase">REF: {item.style}</div>
+                              <div className="text-base font-black text-slate-800 leading-tight">{item.matchedName}</div>
+                              <div className="text-[10px] text-slate-400 font-medium mt-0.5 uppercase">{item.size} / {item.color || '-'}</div>
+                            </td>
+                            <td className="px-6 py-3"><span className="text-lg font-black text-slate-700">{item.qty}</span></td>
+                            <td className="px-6 py-3">
                             <div className="flex items-center gap-2">
                               {item.isMatched
                                 ? <div className="w-7 h-7 rounded-full border border-emerald-200 flex items-center justify-center text-emerald-500"><CheckCircle2 className="w-4 h-4" /></div>
@@ -459,6 +460,7 @@ export default function Page() {
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 </div>
               </div>
             </div>
