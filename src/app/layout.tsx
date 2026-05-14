@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "China Declaration Sync | 중국 신고 단가 추출 자동화",
-  description: "중국 패킹리스트에서 세관 신고용 단가를 자동으로 추출하고 관리하는 프리미엄 플랫폼",
+  title: "중국 신고단가 추출 | China Declaration Sync",
+  description: "중국 패킹리스트 엑셀을 업로드하여 Supabase 매핑 데이터와 실시간 매칭하는 신고단가 자동 추출 시스템",
 };
 
 export default function RootLayout({
@@ -23,10 +23,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
+    <html lang="ko" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
