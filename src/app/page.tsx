@@ -243,9 +243,14 @@ export default function Page() {
                   if (colorCol !== -1) {
                       for (let i = colorCol + 1; i < Math.max(row.length, nextRow.length); i++) {
                           if (i === totalCol) continue;
-                          const hStr = String(row[i] || "").trim();
-                          const nStr = String(nextRow[i] || "").trim();
-                          if ((hStr.match(/[0-9]/) || nStr.match(/[0-9]/)) && !hStr.includes('수량') && !nStr.includes('수량') && !hStr.includes('합계') && !nStr.includes('합계')) {
+                          const hStr = String(row[i] || "").trim().toUpperCase();
+                          const nStr = String(nextRow[i] || "").trim().toUpperCase();
+                          
+                          if (hStr === '사이즈' || hStr.includes('사이즈')) continue;
+                          if (hStr === 'C/T' || hStr === 'CT' || hStr.includes('C/T')) continue;
+                          if (hStr.includes('패킹') || hStr.includes('단가') || hStr.includes('원가')) continue;
+
+                          if ((hStr.match(/[0-9]/) || nStr.match(/[0-9]/)) && !hStr.includes('수량') && !hStr.includes('합계')) {
                               matrixSizeStart = i;
                               isMatrix = true;
                               break;
