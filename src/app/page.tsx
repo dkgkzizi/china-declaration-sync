@@ -35,9 +35,34 @@ export default function Page() {
 
   const pivotItems = useMemo(() => {
     const isNameMatch = (pName: string, iName: string) => {
+      if (!pName || !iName) return false;
       if (pName.includes(iName) || iName.includes(pName)) return true;
       for (let i = 0; i <= iName.length - 2; i++) {
         if (pName.includes(iName.substring(i, i + 2))) return true;
+      }
+      return false;
+    };
+
+    const isPackingNoMatch = (pNo: string, boxNoStr: string) => {
+      if (!pNo || !boxNoStr) return false;
+      const cleanPNo = pNo.toString().replace(/[^0-9]/g, '');
+      const cleanBoxStr = boxNoStr.toString().replace(/\s/g, '');
+      if (cleanBoxStr === cleanPNo) return true;
+      
+      if (cleanBoxStr.includes('-') || cleanBoxStr.includes('~')) {
+        const parts = cleanBoxStr.split(/[-~]/);
+        if (parts.length === 2) {
+          const start = parseInt(parts[0], 10);
+          const end = parseInt(parts[1], 10);
+          const target = parseInt(cleanPNo, 10);
+          if (!isNaN(start) && !isNaN(end) && !isNaN(target)) {
+            if (target >= start && target <= end) return true;
+          }
+        }
+      }
+      if (cleanBoxStr.includes(',')) {
+        const parts = cleanBoxStr.split(',');
+        if (parts.some(p => p.trim() === cleanPNo)) return true;
       }
       return false;
     };
@@ -50,28 +75,30 @@ export default function Page() {
         summaryData[key] = {
           style: item.style,
           matchedName: item.matchedName || item.style,
-          matchedCode: item.matchedCode,
-          isMatched: item.isMatched,
           qty: 0,
+          packingNos: new Set<string>()
         };
       }
-      if (item.isMatched) {
-        summaryData[key].matchedName = item.matchedName;
-        summaryData[key].matchedCode = item.matchedCode;
-        summaryData[key].isMatched = true;
+      if (item.packingNo) {
+        summaryData[key].packingNos.add(item.packingNo);
       }
       summaryData[key].qty += item.qty;
     });
 
-    const invoiceGrouped: { name: string, qty: number, unitPrice: number }[] = [];
+    const invoiceGrouped: { name: string, qty: number, unitPrice: number, boxNo: string }[] = [];
     invoiceData.forEach(inv => {
-      const existing = invoiceGrouped.find(g => g.name === inv.name && g.unitPrice === inv.unitPrice);
-      if (existing) existing.qty += inv.qty;
-      else invoiceGrouped.push({ ...inv });
+      invoiceGrouped.push({ ...inv });
     });
 
     return Object.values(summaryData).map((pItem: any) => {
-      const matches = invoiceGrouped.filter(g => isNameMatch(pItem.matchedName, g.name));
+      const pNos = Array.from(pItem.packingNos) as string[];
+      
+      let matches = invoiceGrouped.filter(g => pNos.some(pNo => isPackingNoMatch(pNo, g.boxNo)));
+      
+      if (matches.length === 0) {
+        matches = invoiceGrouped.filter(g => isNameMatch(pItem.matchedName, g.name));
+      }
+
       let unitPrice = 0;
       
       if (matches.length === 1) {
@@ -99,11 +126,11 @@ export default function Page() {
       const buffer = await f.arrayBuffer();
       const wb = XLSX.read(buffer, { type: 'array' });
       
-      let invoiceExtracted: { name: string, qty: number, unitPrice: number }[] = [];
+      let invoiceExtracted: { name: string, qty: number, unitPrice: number, boxNo: string }[] = [];
       try {
         const firstSheet = wb.Sheets[wb.SheetNames[0]];
         const firstSheetData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as any[][];
-        let nameCol = -1, qtyCol = -1, priceCol = -1;
+        let nameCol = -1, qtyCol = -1, priceCol = -1, boxNoCol = -1;
         
         for (let i = 0; i < firstSheetData.length; i++) {
           const row = firstSheetData[i];
@@ -115,6 +142,7 @@ export default function Page() {
               if (cStr === '품명') nameCol = idx;
               else if (cStr === '총수량' || cStr === '수량') qtyCol = idx;
               else if (cStr === '신고단가') priceCol = idx;
+              else if (cStr === '박스번호' || cStr === '패킹NO.' || cStr === '패킹번호') boxNoCol = idx;
             });
             continue;
           }
@@ -124,10 +152,11 @@ export default function Page() {
             const qty = parseInt(String(row[qtyCol] || "0").replace(/[^0-9]/g, ''));
             const priceStr = String(row[priceCol] || "");
             const price = parseFloat(priceStr.replace(/[^0-9.]/g, ''));
+            const boxNo = boxNoCol !== -1 ? String(row[boxNoCol] || "").trim() : "";
             
             if (name && qty > 0 && !isNaN(price)) {
               if (!name.includes('품명') && !name.includes('합계') && !name.includes('TOTAL')) {
-                invoiceExtracted.push({ name, qty, unitPrice: price });
+                invoiceExtracted.push({ name, qty, unitPrice: price, boxNo });
               }
             }
           }
@@ -155,13 +184,14 @@ export default function Page() {
               if (!Array.isArray(row)) return;
               const rowStr = row.join('|');
               if (rowStr.includes('품명') && (rowStr.includes('합계') || rowStr.includes('수량'))) {
-                  let nameCol = -1, colorCol = -1, totalCol = -1, sizeStartCol = -1, sizeEndCol = -1;
+                  let nameCol = -1, colorCol = -1, totalCol = -1, sizeStartCol = -1, sizeEndCol = -1, packingNoCol = -1;
                   row.forEach((cell, cellIdx) => {
-                      const c = String(cell || "").trim().toUpperCase();
+                      const c = String(cell || "").trim().toUpperCase().replace(/\s/g, '');
                       if (c === '품명' || c === 'ITEM' || c.includes('품명')) nameCol = cellIdx;
                       else if (c === '칼라' || c === '색상' || c.includes('COLOR')) colorCol = cellIdx;
                       else if (c === '합계' || c === '소계' || c === '총계' || c === '수량' || c === '총수량') totalCol = cellIdx;
-                      else if (c === '사이즈') sizeStartCol = cellIdx;
+                      else if (c.includes('사이즈')) sizeStartCol = cellIdx;
+                      else if (c === '패킹NO.' || c === '박스번호' || c === '패킹번호' || c === '패킹NO') packingNoCol = cellIdx;
                   });
                   
                   let isMatrix = false;
@@ -192,7 +222,7 @@ export default function Page() {
                   }
                   
                   if (nameCol !== -1) {
-                      headerRows.push({ rowIdx: idx, nameCol, colorCol, totalCol, sizeStartCol, sizeEndCol, isMatrix });
+                      headerRows.push({ rowIdx: idx, nameCol, colorCol, totalCol, sizeStartCol, sizeEndCol, isMatrix, packingNoCol });
                   }
               }
           });
@@ -200,6 +230,7 @@ export default function Page() {
           headerRows.forEach((header: any, hIdx: number) => {
               let lastName = "";
               let lastColor = "";
+              let lastPackingNo = "";
               
               const headerRowData = jsonData[header.rowIdx];
               const nextRow = jsonData[header.rowIdx + 1];
@@ -241,6 +272,13 @@ export default function Page() {
                   }
 
                   if (!currentName) continue;
+
+                  let packingNo = header.packingNoCol !== -1 ? String(row[header.packingNoCol] || "").trim() : "";
+                  if (!packingNo && lastPackingNo) {
+                      packingNo = lastPackingNo;
+                  } else if (packingNo) {
+                      lastPackingNo = packingNo;
+                  }
                   
                   let color = String(row[header.colorCol] || "").trim();
                   if (!color && lastColor) {
@@ -264,7 +302,8 @@ export default function Page() {
                                       style: currentName, 
                                       color: color, 
                                       size: sHeader, 
-                                      qty: sVal
+                                      qty: sVal,
+                                      packingNo
                                   });
                                   foundSizes = true;
                               }
@@ -275,7 +314,8 @@ export default function Page() {
                                   style: currentName, 
                                   color: color, 
                                   size: "FREE", 
-                                  qty: totalQty
+                                  qty: totalQty,
+                                  packingNo
                               });
                           }
                       } else {
@@ -284,7 +324,8 @@ export default function Page() {
                               style: currentName, 
                               color: color, 
                               size: sizeStr, 
-                              qty: totalQty
+                              qty: totalQty,
+                              packingNo
                           });
                       }
                   }
