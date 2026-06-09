@@ -21,6 +21,7 @@ export default function Page() {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<MatchedItem[]>([]);
+  const [invoiceData, setInvoiceData] = useState<{name: string, qty: number, unitPrice: number}[]>([]);
   const [error, setError] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -33,11 +34,49 @@ export default function Page() {
   const [searchLoading, setSearchLoading] = useState(false);
 
   const parseAndMatch = async (f: File) => {
-    setError(''); setItems([]); setLoading(true);
+    setError(''); setItems([]); setInvoiceData([]); setLoading(true);
     try {
       const buffer = await f.arrayBuffer();
       const wb = XLSX.read(buffer, { type: 'array' });
       
+      let invoiceExtracted: { name: string, qty: number, unitPrice: number }[] = [];
+      try {
+        const firstSheet = wb.Sheets[wb.SheetNames[0]];
+        const firstSheetData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as any[][];
+        let nameCol = -1, qtyCol = -1, priceCol = -1;
+        
+        for (let i = 0; i < firstSheetData.length; i++) {
+          const row = firstSheetData[i];
+          if (!Array.isArray(row)) continue;
+          
+          if (nameCol === -1) {
+            row.forEach((cell, idx) => {
+              const cStr = String(cell || "").replace(/\s/g, '');
+              if (cStr === '품명') nameCol = idx;
+              else if (cStr === '총수량' || cStr === '수량') qtyCol = idx;
+              else if (cStr === '신고단가') priceCol = idx;
+            });
+            continue;
+          }
+
+          if (nameCol !== -1 && qtyCol !== -1 && priceCol !== -1) {
+            const name = String(row[nameCol] || "").trim();
+            const qty = parseInt(String(row[qtyCol] || "0").replace(/[^0-9]/g, ''));
+            const priceStr = String(row[priceCol] || "");
+            const price = parseFloat(priceStr.replace(/[^0-9.]/g, ''));
+            
+            if (name && qty > 0 && !isNaN(price)) {
+              if (!name.includes('품명') && !name.includes('합계') && !name.includes('TOTAL')) {
+                invoiceExtracted.push({ name, qty, unitPrice: price });
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error("첫번째 시트 파싱 에러:", e);
+      }
+      setInvoiceData(invoiceExtracted);
+
       let clientExtractedData: any[] = [];
       const targetSheets = wb.SheetNames.filter(name => 
           name.includes('OZ') || name.includes('OH') || name.includes('오즈') || name.includes('오에이치') || name.includes('매칭')
@@ -256,27 +295,75 @@ export default function Page() {
     summaryWs.columns = [
       { header: '행 레이블', key: 'productName', width: 30 },
       { header: '합계 : 수량', key: 'totalQty', width: 15 },
+      { header: '신고단가', key: 'unitPrice', width: 15 },
+      { header: '신고금액', key: 'totalPrice', width: 15 },
     ];
     summaryWs.getRow(1).font = { bold: true };
 
     const summaryData: Record<string, number> = {};
-    let grandTotal = 0;
+    let grandTotalQty = 0;
     
     items.forEach(item => {
       const name = item.matchedName || item.style || '알 수 없음';
-      if (!summaryData[name]) {
-        summaryData[name] = 0;
-      }
+      if (!summaryData[name]) summaryData[name] = 0;
       summaryData[name] += item.qty;
-      grandTotal += item.qty;
+      grandTotalQty += item.qty;
     });
+
+    const invoiceGrouped: { name: string, qty: number, unitPrice: number }[] = [];
+    invoiceData.forEach(inv => {
+      const existing = invoiceGrouped.find(g => g.name === inv.name && g.unitPrice === inv.unitPrice);
+      if (existing) existing.qty += inv.qty;
+      else invoiceGrouped.push({ ...inv });
+    });
+
+    const isNameMatch = (pName: string, iName: string) => {
+      if (pName.includes(iName) || iName.includes(pName)) return true;
+      for (let i = 0; i <= iName.length - 2; i++) {
+        if (pName.includes(iName.substring(i, i + 2))) return true;
+      }
+      return false;
+    };
+
+    let grandTotalPrice = 0;
 
     Object.entries(summaryData).forEach(([name, qty]) => {
-      summaryWs.addRow({ productName: name, totalQty: qty });
+      const matches = invoiceGrouped.filter(g => isNameMatch(name, g.name));
+      let unitPrice = 0;
+      
+      if (matches.length === 1) {
+        unitPrice = matches[0].unitPrice;
+      } else if (matches.length > 1) {
+        const exactQtyMatch = matches.find(g => g.qty === qty);
+        unitPrice = exactQtyMatch ? exactQtyMatch.unitPrice : matches[0].unitPrice;
+      }
+
+      const totalPrice = unitPrice > 0 ? qty * unitPrice : 0;
+      grandTotalPrice += totalPrice;
+
+      const row = summaryWs.addRow({ 
+        productName: name, 
+        totalQty: qty,
+        unitPrice: unitPrice > 0 ? unitPrice : null,
+        totalPrice: totalPrice > 0 ? totalPrice : null
+      });
+
+      if (unitPrice > 0) {
+        row.getCell('unitPrice').numFmt = '"$"#,##0.00';
+        row.getCell('totalPrice').numFmt = '"$"#,##0.00';
+      }
     });
 
-    const totalRow = summaryWs.addRow({ productName: '총합계', totalQty: grandTotal });
+    const totalRow = summaryWs.addRow({ 
+      productName: '총합계', 
+      totalQty: grandTotalQty,
+      unitPrice: null,
+      totalPrice: grandTotalPrice > 0 ? grandTotalPrice : null
+    });
     totalRow.font = { bold: true };
+    if (grandTotalPrice > 0) {
+      totalRow.getCell('totalPrice').numFmt = '"$"#,##0.00';
+    }
 
     // 2. 상세 데이터 시트 (신고단가결과)
     const ws = wb.addWorksheet('신고단가결과');
