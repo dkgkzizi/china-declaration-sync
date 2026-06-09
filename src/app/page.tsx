@@ -250,6 +250,35 @@ export default function Page() {
 
   const handleDownload = async () => {
     const wb = new ExcelJS.Workbook();
+    
+    // 1. 피벗 테이블 형태의 요약 시트 추가
+    const summaryWs = wb.addWorksheet('Sheet1');
+    summaryWs.columns = [
+      { header: '행 레이블', key: 'productName', width: 30 },
+      { header: '합계 : 수량', key: 'totalQty', width: 15 },
+    ];
+    summaryWs.getRow(1).font = { bold: true };
+
+    const summaryData: Record<string, number> = {};
+    let grandTotal = 0;
+    
+    items.forEach(item => {
+      const name = item.matchedName || item.style || '알 수 없음';
+      if (!summaryData[name]) {
+        summaryData[name] = 0;
+      }
+      summaryData[name] += item.qty;
+      grandTotal += item.qty;
+    });
+
+    Object.entries(summaryData).forEach(([name, qty]) => {
+      summaryWs.addRow({ productName: name, totalQty: qty });
+    });
+
+    const totalRow = summaryWs.addRow({ productName: '총합계', totalQty: grandTotal });
+    totalRow.font = { bold: true };
+
+    // 2. 상세 데이터 시트 (신고단가결과)
     const ws = wb.addWorksheet('신고단가결과');
     ws.columns = [
       { header: '상품코드', key: 'matchedCode', width: 20 },
@@ -261,7 +290,14 @@ export default function Page() {
     const hRow = ws.getRow(1);
     hRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     hRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE53E3E' } };
-    items.forEach(item => ws.addRow(item));
+    
+    items.forEach(item => {
+      ws.addRow({
+        ...item,
+        matchedName: item.matchedName || item.style
+      });
+    });
+
     const buf = await wb.xlsx.writeBuffer();
     saveAs(new Blob([buf]), `신고단가_${file?.name || '결과'}.xlsx`);
   };
