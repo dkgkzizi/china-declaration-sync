@@ -212,29 +212,26 @@ export default function Page() {
       setInvoiceData(invoiceExtracted);
 
       let clientExtractedData: any[] = [];
-      const targetSheets = wb.SheetNames.filter(name => 
-          name.includes('OZ') || name.includes('OH') || name.includes('오즈') || name.includes('오에이치') || name.includes('매칭')
-      );
-      const sheetsToProcess = targetSheets.length > 0 ? targetSheets : 
-                             (wb.SheetNames.length >= 2 ? [wb.SheetNames[1]] : wb.SheetNames);
+      const sheetsToProcess = wb.SheetNames.slice(1);
+      const allTableData: { hasPackingNo: boolean, data: any[] }[] = [];
 
       sheetsToProcess.forEach(sheetName => {
           const worksheet = wb.Sheets[sheetName];
           const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
           if (jsonData.length === 0) return;
 
-          const headerRows: { rowIdx: number, nameCol: number, colorCol: number, totalCol: number, sizeStartCol: number, sizeEndCol: number, isMatrix: boolean }[] = [];
+          const headerRows: { rowIdx: number, nameCol: number, colorCol: number, totalCol: number, sizeStartCol: number, sizeEndCol: number, isMatrix: boolean, packingNoCol: number }[] = [];
           
           jsonData.forEach((row, idx) => {
               if (!Array.isArray(row)) return;
               const rowStr = row.join('|');
-              if (rowStr.includes('품명') && (rowStr.includes('합계') || rowStr.includes('수량'))) {
+              if (rowStr.includes('품명') && (rowStr.includes('합계') || rowStr.includes('수량') || rowStr.includes('TOTAL'))) {
                   let nameCol = -1, colorCol = -1, totalCol = -1, sizeStartCol = -1, sizeEndCol = -1, packingNoCol = -1;
                   row.forEach((cell, cellIdx) => {
                       const c = String(cell || "").trim().toUpperCase().replace(/\s/g, '');
                       if (c === '품명' || c === 'ITEM' || c.includes('품명')) nameCol = cellIdx;
                       else if (c === '칼라' || c === '색상' || c.includes('COLOR')) colorCol = cellIdx;
-                      else if (c === '합계' || c === '소계' || c === '총계' || c === '수량' || c === '총수량') totalCol = cellIdx;
+                      else if (c === '합계' || c === '소계' || c === '총계' || c === '수량' || c === '총수량' || c === 'TOTAL') totalCol = cellIdx;
                       else if (c.includes('사이즈')) sizeStartCol = cellIdx;
                       else if (c === '패킹NO.' || c === '박스번호' || c === '패킹번호' || c === '패킹NO') packingNoCol = cellIdx;
                   });
@@ -248,7 +245,7 @@ export default function Page() {
                           if (i === totalCol) continue;
                           const hStr = String(row[i] || "").trim();
                           const nStr = String(nextRow[i] || "").trim();
-                          if ((hStr.match(/[0-9]/) || nStr.match(/[0-9]/)) && !hStr.includes('수량') && !nStr.includes('수량')) {
+                          if ((hStr.match(/[0-9]/) || nStr.match(/[0-9]/)) && !hStr.includes('수량') && !nStr.includes('수량') && !hStr.includes('합계') && !nStr.includes('합계')) {
                               matrixSizeStart = i;
                               isMatrix = true;
                               break;
@@ -285,6 +282,8 @@ export default function Page() {
               const sizeHeaderRowIdx = isTwoStepHeader ? header.rowIdx + 1 : header.rowIdx;
               const dataStartRowIdx = isTwoStepHeader ? header.rowIdx + 2 : header.rowIdx + 1;
               const nextHeaderRowIdx = hIdx + 1 < headerRows.length ? headerRows[hIdx + 1].rowIdx : jsonData.length;
+
+              const tableItems: any[] = [];
 
               for (let rIdx = dataStartRowIdx; rIdx < nextHeaderRowIdx; rIdx++) {
                   const row = jsonData[rIdx];
@@ -343,7 +342,7 @@ export default function Page() {
                                   let sHeader = String(jsonData[sizeHeaderRowIdx]?.[sIdx] || "").trim();
                                   if (!sHeader || sHeader.includes('사이즈')) sHeader = "FREE";
                                   
-                                  clientExtractedData.push({ 
+                                  tableItems.push({ 
                                       style: currentName, 
                                       color: color, 
                                       size: sHeader, 
@@ -355,7 +354,7 @@ export default function Page() {
                           }
                           
                           if (!foundSizes && totalQty > 0) {
-                              clientExtractedData.push({ 
+                              tableItems.push({ 
                                   style: currentName, 
                                   color: color, 
                                   size: "FREE", 
@@ -365,7 +364,7 @@ export default function Page() {
                           }
                       } else {
                           const sizeStr = header.sizeStartCol !== -1 ? String(row[header.sizeStartCol] || "FREE").trim() : "FREE";
-                          clientExtractedData.push({ 
+                          tableItems.push({ 
                               style: currentName, 
                               color: color, 
                               size: sizeStr, 
@@ -375,7 +374,16 @@ export default function Page() {
                       }
                   }
               }
+              if (tableItems.length > 0) {
+                  allTableData.push({ hasPackingNo: header.packingNoCol !== -1, data: tableItems });
+              }
           });
+      });
+
+      const hasAnyPackingNo = allTableData.some(t => t.hasPackingNo);
+      allTableData.forEach(t => {
+          if (hasAnyPackingNo && !t.hasPackingNo) return;
+          clientExtractedData.push(...t.data);
       });
 
       if (clientExtractedData.length === 0) {
