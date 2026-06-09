@@ -561,21 +561,16 @@ export default function Page() {
                     <table className="w-full text-left">
                       <thead className="sticky top-0 bg-white/95 backdrop-blur-sm z-10 shadow-sm border-b border-slate-100">
                         <tr>
-                          {['Master SKU', 'Product Name', 'Total Qty', 'Unit Price', 'Total Price', 'Valid'].map(h => (
+                          {['Product Name', 'Total Qty', 'Unit Price', 'Total Price'].map(h => (
                             <th key={h} className="px-5 py-2.5 text-[8px] font-black text-slate-400 uppercase tracking-widest">{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
                         {pivotItems.length === 0 ? (
-                          <tr><td colSpan={6} className="px-5 py-24 text-center text-slate-300 text-xs font-bold uppercase tracking-widest">좌측에서 패킹리스트 파일을 업로드하세요</td></tr>
+                          <tr><td colSpan={4} className="px-5 py-24 text-center text-slate-300 text-xs font-bold uppercase tracking-widest">좌측에서 패킹리스트 파일을 업로드하세요</td></tr>
                         ) : pivotItems.map((item, idx) => (
                           <tr key={item.style} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors group">
-                            <td className="px-5 py-3">
-                              <span className={`text-xs font-bold ${item.isMatched ? 'text-slate-700' : 'text-red-400'}`}>
-                                {item.isMatched ? item.matchedCode : '미매칭'}
-                              </span>
-                            </td>
                             <td className="px-5 py-3">
                               <div className="inline-block px-1.5 py-0.5 bg-red-50 text-red-400 text-[8px] font-black rounded mb-0.5 uppercase">REF: {item.style}</div>
                               <div className="text-sm font-black text-slate-800 leading-tight">{item.matchedName}</div>
@@ -595,35 +590,14 @@ export default function Page() {
                                 <span className="text-xs font-medium text-slate-300">-</span>
                               )}
                             </td>
-                            <td className="px-5 py-3">
-                              <div className="flex items-center gap-2">
-                                {item.isMatched
-                                  ? <div className="w-7 h-7 rounded-full border border-emerald-200 flex items-center justify-center text-emerald-500"><CheckCircle2 className="w-4 h-4" /></div>
-                                  : <div className="w-7 h-7 rounded-full border border-red-200 flex items-center justify-center text-red-400"><AlertCircle className="w-4 h-4" /></div>
-                                }
-                                <button
-                                  onClick={() => { 
-                                    const originalIdx = items.findIndex(i => i.style === item.style);
-                                    setEditIdx(originalIdx); 
-                                    setModalOpen(true); 
-                                    setSearchTerm(''); 
-                                    setSearchResults([]); 
-                                  }}
-                                  className="w-7 h-7 rounded-full border border-slate-200 flex items-center justify-center text-slate-300 hover:border-blue-300 hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100"
-                                >
-                                  <Edit2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </td>
                           </tr>
                         ))}
                         {pivotItems.length > 0 && (
                           <tr className="bg-slate-50/80 border-t-2 border-slate-200">
-                            <td colSpan={2} className="px-5 py-4 text-right text-xs font-black text-slate-500 uppercase tracking-widest">TOTAL</td>
+                            <td className="px-5 py-4 text-right text-xs font-black text-slate-500 uppercase tracking-widest">TOTAL</td>
                             <td className="px-5 py-4"><span className="text-lg font-black text-slate-800">{totalQty.toLocaleString()}</span></td>
                             <td className="px-5 py-4"></td>
                             <td className="px-5 py-4"><span className="text-lg font-black text-red-600">${grandTotalPrice.toFixed(2)}</span></td>
-                            <td className="px-5 py-4"></td>
                           </tr>
                         )}
                       </tbody>
