@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { FileSpreadsheet, ChevronRight, TrendingUp, Download, RefreshCcw, Loader2, ArrowRightLeft, CheckCircle2, AlertCircle, Lock, Search, X, Edit2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
@@ -32,6 +32,66 @@ export default function Page() {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+
+  const pivotItems = useMemo(() => {
+    const isNameMatch = (pName: string, iName: string) => {
+      if (pName.includes(iName) || iName.includes(pName)) return true;
+      for (let i = 0; i <= iName.length - 2; i++) {
+        if (pName.includes(iName.substring(i, i + 2))) return true;
+      }
+      return false;
+    };
+
+    const summaryData: Record<string, any> = {};
+
+    items.forEach(item => {
+      const key = item.style;
+      if (!summaryData[key]) {
+        summaryData[key] = {
+          style: item.style,
+          matchedName: item.matchedName || item.style,
+          matchedCode: item.matchedCode,
+          isMatched: item.isMatched,
+          qty: 0,
+        };
+      }
+      if (item.isMatched) {
+        summaryData[key].matchedName = item.matchedName;
+        summaryData[key].matchedCode = item.matchedCode;
+        summaryData[key].isMatched = true;
+      }
+      summaryData[key].qty += item.qty;
+    });
+
+    const invoiceGrouped: { name: string, qty: number, unitPrice: number }[] = [];
+    invoiceData.forEach(inv => {
+      const existing = invoiceGrouped.find(g => g.name === inv.name && g.unitPrice === inv.unitPrice);
+      if (existing) existing.qty += inv.qty;
+      else invoiceGrouped.push({ ...inv });
+    });
+
+    return Object.values(summaryData).map((pItem: any) => {
+      const matches = invoiceGrouped.filter(g => isNameMatch(pItem.matchedName, g.name));
+      let unitPrice = 0;
+      
+      if (matches.length === 1) {
+        unitPrice = matches[0].unitPrice;
+      } else if (matches.length > 1) {
+        const exactQtyMatch = matches.find(g => g.qty === pItem.qty);
+        unitPrice = exactQtyMatch ? exactQtyMatch.unitPrice : matches[0].unitPrice;
+      }
+
+      return {
+        ...pItem,
+        unitPrice,
+        totalPrice: unitPrice > 0 ? pItem.qty * unitPrice : 0
+      };
+    });
+  }, [items, invoiceData]);
+
+  const totalQty = items.reduce((s, r) => s + r.qty, 0);
+  const matchedQty = items.filter(i => i.isMatched).reduce((s, r) => s + r.qty, 0);
+  const grandTotalPrice = pivotItems.reduce((acc, curr) => acc + curr.totalPrice, 0);
 
   const parseAndMatch = async (f: File) => {
     setError(''); setItems([]); setInvoiceData([]); setLoading(true);
@@ -300,55 +360,15 @@ export default function Page() {
     ];
     summaryWs.getRow(1).font = { bold: true };
 
-    const summaryData: Record<string, number> = {};
-    let grandTotalQty = 0;
-    
-    items.forEach(item => {
-      const name = item.matchedName || item.style || '알 수 없음';
-      if (!summaryData[name]) summaryData[name] = 0;
-      summaryData[name] += item.qty;
-      grandTotalQty += item.qty;
-    });
-
-    const invoiceGrouped: { name: string, qty: number, unitPrice: number }[] = [];
-    invoiceData.forEach(inv => {
-      const existing = invoiceGrouped.find(g => g.name === inv.name && g.unitPrice === inv.unitPrice);
-      if (existing) existing.qty += inv.qty;
-      else invoiceGrouped.push({ ...inv });
-    });
-
-    const isNameMatch = (pName: string, iName: string) => {
-      if (pName.includes(iName) || iName.includes(pName)) return true;
-      for (let i = 0; i <= iName.length - 2; i++) {
-        if (pName.includes(iName.substring(i, i + 2))) return true;
-      }
-      return false;
-    };
-
-    let grandTotalPrice = 0;
-
-    Object.entries(summaryData).forEach(([name, qty]) => {
-      const matches = invoiceGrouped.filter(g => isNameMatch(name, g.name));
-      let unitPrice = 0;
-      
-      if (matches.length === 1) {
-        unitPrice = matches[0].unitPrice;
-      } else if (matches.length > 1) {
-        const exactQtyMatch = matches.find(g => g.qty === qty);
-        unitPrice = exactQtyMatch ? exactQtyMatch.unitPrice : matches[0].unitPrice;
-      }
-
-      const totalPrice = unitPrice > 0 ? qty * unitPrice : 0;
-      grandTotalPrice += totalPrice;
-
+    pivotItems.forEach(pItem => {
       const row = summaryWs.addRow({ 
-        productName: name, 
-        totalQty: qty,
-        unitPrice: unitPrice > 0 ? unitPrice : null,
-        totalPrice: totalPrice > 0 ? totalPrice : null
+        productName: pItem.matchedName, 
+        totalQty: pItem.qty,
+        unitPrice: pItem.unitPrice > 0 ? pItem.unitPrice : null,
+        totalPrice: pItem.totalPrice > 0 ? pItem.totalPrice : null
       });
 
-      if (unitPrice > 0) {
+      if (pItem.unitPrice > 0) {
         row.getCell('unitPrice').numFmt = '"$"#,##0.00';
         row.getCell('totalPrice').numFmt = '"$"#,##0.00';
       }
@@ -356,7 +376,7 @@ export default function Page() {
 
     const totalRow = summaryWs.addRow({ 
       productName: '총합계', 
-      totalQty: grandTotalQty,
+      totalQty: totalQty,
       unitPrice: null,
       totalPrice: grandTotalPrice > 0 ? grandTotalPrice : null
     });
@@ -388,9 +408,6 @@ export default function Page() {
     const buf = await wb.xlsx.writeBuffer();
     saveAs(new Blob([buf]), `신고단가_${file?.name || '결과'}.xlsx`);
   };
-
-  const totalQty = items.reduce((s, r) => s + r.qty, 0);
-  const matchedQty = items.filter(i => i.isMatched).reduce((s, r) => s + r.qty, 0);
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-800 font-sans selection:bg-red-100 selection:text-red-900 overflow-x-hidden">
@@ -544,45 +561,73 @@ export default function Page() {
                     <table className="w-full text-left">
                       <thead className="sticky top-0 bg-white/95 backdrop-blur-sm z-10 shadow-sm border-b border-slate-100">
                         <tr>
-                          {['Master SKU', 'Detail Matrix', 'Qty Score', 'Valid'].map(h => (
+                          {['Master SKU', 'Product Name', 'Total Qty', 'Unit Price', 'Total Price', 'Valid'].map(h => (
                             <th key={h} className="px-5 py-2.5 text-[8px] font-black text-slate-400 uppercase tracking-widest">{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {items.length === 0 ? (
-                          <tr><td colSpan={4} className="px-5 py-24 text-center text-slate-300 text-xs font-bold uppercase tracking-widest">좌측에서 패킹리스트 파일을 업로드하세요</td></tr>
-                        ) : items.map((item, idx) => (
-                          <tr key={item.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors group">
-                            <td className="px-5 py-2.5">
+                        {pivotItems.length === 0 ? (
+                          <tr><td colSpan={6} className="px-5 py-24 text-center text-slate-300 text-xs font-bold uppercase tracking-widest">좌측에서 패킹리스트 파일을 업로드하세요</td></tr>
+                        ) : pivotItems.map((item, idx) => (
+                          <tr key={item.style} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors group">
+                            <td className="px-5 py-3">
                               <span className={`text-xs font-bold ${item.isMatched ? 'text-slate-700' : 'text-red-400'}`}>
                                 {item.isMatched ? item.matchedCode : '미매칭'}
                               </span>
                             </td>
-                            <td className="px-5 py-2.5">
+                            <td className="px-5 py-3">
                               <div className="inline-block px-1.5 py-0.5 bg-red-50 text-red-400 text-[8px] font-black rounded mb-0.5 uppercase">REF: {item.style}</div>
                               <div className="text-sm font-black text-slate-800 leading-tight">{item.matchedName}</div>
-                              <div className="text-[9px] text-slate-400 font-medium mt-0.5 uppercase">{item.size} / {item.color || '-'}</div>
                             </td>
-                            <td className="px-5 py-2.5"><span className="text-base font-black text-slate-700">{item.qty}</span></td>
-                            <td className="px-5 py-2.5">
-                            <div className="flex items-center gap-2">
-                              {item.isMatched
-                                ? <div className="w-7 h-7 rounded-full border border-emerald-200 flex items-center justify-center text-emerald-500"><CheckCircle2 className="w-4 h-4" /></div>
-                                : <div className="w-7 h-7 rounded-full border border-red-200 flex items-center justify-center text-red-400"><AlertCircle className="w-4 h-4" /></div>
-                              }
-                              <button
-                                onClick={() => { setEditIdx(idx); setModalOpen(true); setSearchTerm(''); setSearchResults([]); }}
-                                className="w-7 h-7 rounded-full border border-slate-200 flex items-center justify-center text-slate-300 hover:border-blue-300 hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                            <td className="px-5 py-3"><span className="text-base font-black text-slate-700">{item.qty}</span></td>
+                            <td className="px-5 py-3">
+                              {item.unitPrice > 0 ? (
+                                <span className="text-sm font-bold text-slate-600">${item.unitPrice.toFixed(2)}</span>
+                              ) : (
+                                <span className="text-xs font-medium text-slate-300">-</span>
+                              )}
+                            </td>
+                            <td className="px-5 py-3">
+                              {item.totalPrice > 0 ? (
+                                <span className="text-sm font-black text-slate-800">${item.totalPrice.toFixed(2)}</span>
+                              ) : (
+                                <span className="text-xs font-medium text-slate-300">-</span>
+                              )}
+                            </td>
+                            <td className="px-5 py-3">
+                              <div className="flex items-center gap-2">
+                                {item.isMatched
+                                  ? <div className="w-7 h-7 rounded-full border border-emerald-200 flex items-center justify-center text-emerald-500"><CheckCircle2 className="w-4 h-4" /></div>
+                                  : <div className="w-7 h-7 rounded-full border border-red-200 flex items-center justify-center text-red-400"><AlertCircle className="w-4 h-4" /></div>
+                                }
+                                <button
+                                  onClick={() => { 
+                                    const originalIdx = items.findIndex(i => i.style === item.style);
+                                    setEditIdx(originalIdx); 
+                                    setModalOpen(true); 
+                                    setSearchTerm(''); 
+                                    setSearchResults([]); 
+                                  }}
+                                  className="w-7 h-7 rounded-full border border-slate-200 flex items-center justify-center text-slate-300 hover:border-blue-300 hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                        {pivotItems.length > 0 && (
+                          <tr className="bg-slate-50/80 border-t-2 border-slate-200">
+                            <td colSpan={2} className="px-5 py-4 text-right text-xs font-black text-slate-500 uppercase tracking-widest">TOTAL</td>
+                            <td className="px-5 py-4"><span className="text-lg font-black text-slate-800">{totalQty.toLocaleString()}</span></td>
+                            <td className="px-5 py-4"></td>
+                            <td className="px-5 py-4"><span className="text-lg font-black text-red-600">${grandTotalPrice.toFixed(2)}</span></td>
+                            <td className="px-5 py-4"></td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               </div>
