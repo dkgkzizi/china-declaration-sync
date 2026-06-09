@@ -45,25 +45,38 @@ export default function Page() {
 
     const isPackingNoMatch = (pNo: string, boxNoStr: string) => {
       if (!pNo || !boxNoStr) return false;
-      const cleanPNo = pNo.toString().replace(/[^0-9]/g, '');
-      const cleanBoxStr = boxNoStr.toString().replace(/\s/g, '');
-      if (cleanBoxStr === cleanPNo) return true;
+      const s1 = String(pNo).replace(/\s/g, '');
+      const s2 = String(boxNoStr).replace(/\s/g, '');
+      if (s1 === s2) return true;
       
-      if (cleanBoxStr.includes('-') || cleanBoxStr.includes('~')) {
-        const parts = cleanBoxStr.split(/[-~]/);
-        if (parts.length === 2) {
-          const start = parseInt(parts[0], 10);
-          const end = parseInt(parts[1], 10);
-          const target = parseInt(cleanPNo, 10);
-          if (!isNaN(start) && !isNaN(end) && !isNaN(target)) {
-            if (target >= start && target <= end) return true;
+      const parseRange = (str: string) => {
+        if (str.includes('-') || str.includes('~')) {
+          const parts = str.split(/[-~]/);
+          return { s: parseInt(parts[0], 10), e: parseInt(parts[1], 10) };
+        }
+        const val = parseInt(str.replace(/[^0-9]/g, ''), 10);
+        return { s: val, e: val };
+      };
+
+      if (s2.includes(',')) {
+        const parts = s2.split(',');
+        const pRange = parseRange(s1);
+        for (const p of parts) {
+          const bRange = parseRange(p);
+          if (!isNaN(pRange.s) && !isNaN(bRange.s)) {
+            if (pRange.s >= bRange.s && pRange.s <= bRange.e) return true;
           }
         }
+        return false;
       }
-      if (cleanBoxStr.includes(',')) {
-        const parts = cleanBoxStr.split(',');
-        if (parts.some(p => p.trim() === cleanPNo)) return true;
+
+      const pRange = parseRange(s1);
+      const bRange = parseRange(s2);
+
+      if (!isNaN(pRange.s) && !isNaN(pRange.e) && !isNaN(bRange.s) && !isNaN(bRange.e)) {
+         if (pRange.s >= bRange.s && pRange.s <= bRange.e) return true;
       }
+
       return false;
     };
 
@@ -104,8 +117,20 @@ export default function Page() {
       if (matches.length === 1) {
         unitPrice = matches[0].unitPrice;
       } else if (matches.length > 1) {
-        const exactQtyMatch = matches.find(g => g.qty === pItem.qty);
-        unitPrice = exactQtyMatch ? exactQtyMatch.unitPrice : matches[0].unitPrice;
+        const nameMatch = matches.filter(g => isNameMatch(pItem.matchedName, g.name));
+        if (nameMatch.length === 1) {
+           unitPrice = nameMatch[0].unitPrice;
+        } else if (nameMatch.length > 1) {
+           unitPrice = nameMatch[0].unitPrice;
+        } else {
+           const groupedMatches: Record<string, any> = {};
+           matches.forEach(m => {
+             if (!groupedMatches[m.name]) groupedMatches[m.name] = { ...m, qty: 0 };
+             groupedMatches[m.name].qty += m.qty;
+           });
+           const exactQtyMatch = Object.values(groupedMatches).find(g => g.qty === pItem.qty);
+           unitPrice = exactQtyMatch ? exactQtyMatch.unitPrice : matches[0].unitPrice;
+        }
       }
 
       return {
@@ -131,6 +156,9 @@ export default function Page() {
         const firstSheet = wb.Sheets[wb.SheetNames[0]];
         const firstSheetData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as any[][];
         let nameCol = -1, qtyCol = -1, priceCol = -1, boxNoCol = -1;
+        let lastName = "";
+        let lastPrice = NaN;
+        let lastBoxNo = "";
         
         for (let i = 0; i < firstSheetData.length; i++) {
           const row = firstSheetData[i];
@@ -148,12 +176,29 @@ export default function Page() {
           }
 
           if (nameCol !== -1 && qtyCol !== -1 && priceCol !== -1) {
-            const name = String(row[nameCol] || "").trim();
-            const qty = parseInt(String(row[qtyCol] || "0").replace(/[^0-9]/g, ''));
-            const priceStr = String(row[priceCol] || "");
-            const price = parseFloat(priceStr.replace(/[^0-9.]/g, ''));
-            const boxNo = boxNoCol !== -1 ? String(row[boxNoCol] || "").trim() : "";
+            let name = String(row[nameCol] || "").trim();
+            const qtyStr = String(row[qtyCol] || "0").replace(/[^0-9]/g, '');
+            const qty = parseInt(qtyStr, 10);
             
+            const priceStr = String(row[priceCol] || "");
+            let price = parseFloat(priceStr.replace(/[^0-9.]/g, ''));
+            let boxNo = boxNoCol !== -1 ? String(row[boxNoCol] || "").trim() : "";
+            
+            if (qty > 0) {
+              if (!name && lastName) name = lastName;
+              else if (name) lastName = name;
+
+              if (isNaN(price) && !isNaN(lastPrice)) price = lastPrice;
+              else if (!isNaN(price)) lastPrice = price;
+
+              if (!boxNo && lastBoxNo) boxNo = lastBoxNo;
+              else if (boxNo) lastBoxNo = boxNo;
+            } else {
+              if (name && !name.includes('품명') && !name.includes('합계')) lastName = name;
+              if (!isNaN(price) && price > 0) lastPrice = price;
+              if (boxNo) lastBoxNo = boxNo;
+            }
+
             if (name && qty > 0 && !isNaN(price)) {
               if (!name.includes('품명') && !name.includes('합계') && !name.includes('TOTAL')) {
                 invoiceExtracted.push({ name, qty, unitPrice: price, boxNo });
