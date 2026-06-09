@@ -385,10 +385,17 @@ export default function Page() {
           });
       });
 
-      const hasAnyPackingNo = allTableData.some(t => t.hasPackingNo);
+      // We will allow all tables to prevent data loss. If duplicates occur, we deduplicate by style, color, size, packingNo.
+      // But actually, just adding everything back will immediately restore the lost 2100+ items.
+      const uniqueItems = new Set();
       allTableData.forEach(t => {
-          if (hasAnyPackingNo && !t.hasPackingNo) return;
-          clientExtractedData.push(...t.data);
+          t.data.forEach(item => {
+             const key = `${item.style}|${item.color}|${item.size}|${item.qty}|${item.packingNo}`;
+             if (!uniqueItems.has(key)) {
+                 uniqueItems.add(key);
+                 clientExtractedData.push(item);
+             }
+          });
       });
 
       if (clientExtractedData.length === 0) {
