@@ -36,9 +36,23 @@ export default function Page() {
   const pivotItems = useMemo(() => {
     const isNameMatch = (pName: string, iName: string) => {
       if (!pName || !iName) return false;
-      if (pName.includes(iName) || iName.includes(pName)) return true;
-      for (let i = 0; i <= iName.length - 2; i++) {
-        if (pName.includes(iName.substring(i, i + 2))) return true;
+      const cleanP = pName.replace(/[^a-zA-Z0-9가-힣]/g, '').toUpperCase();
+      const cleanI = iName.replace(/[^a-zA-Z0-9가-힣]/g, '').toUpperCase();
+      
+      if (cleanP === cleanI) return true;
+      if (cleanP.includes(cleanI) || cleanI.includes(cleanP)) return true;
+
+      // 두 글자 이상 일치하는 형태소(명사 등)가 있는지 확인
+      // 단순히 2글자 연속 매칭은 오탐이 많으므로 3글자 이상이거나 특정 키워드(바지, 가방 등) 포함 여부 체크
+      const keywords = ['바지', '가방', '우비', '박스', '조끼', '팬츠', '치마', '모자', '양말', '신발', '슈즈', '티셔츠', '맨투맨', '원피스', '상하복', '세트', '가디건', '자켓', '점퍼', '코트', '패딩', '레깅스', '타이즈', '니트', '스웨터', '셔츠', '블라우스', '스커트', '수영복', '래쉬가드', '잠옷', '내복', '속옷', '팬티', '런닝', '브라', '마스크', '장갑', '목도리', '스카프', '넥워머', '귀마개', '헤어밴드', '머리띠', '핀', '방울', '끈', '가방', '백팩', '크로스백', '에코백', '파우치', '지갑', '벨트', '안경', '선글라스', '우산', '시계', '주얼리', '악세사리', '기타', '사은품', '포장', '케이스', '캐리어', '반다나', '팔보호대', '앞치마', '앙상블'];
+      
+      for (const kw of keywords) {
+        if (cleanP.includes(kw) && cleanI.includes(kw)) return true;
+      }
+
+      // 그래도 없으면 3글자 이상 연속 매칭 허용 (너무 짧은 2글자 매칭은 제외)
+      for (let i = 0; i <= cleanI.length - 3; i++) {
+        if (cleanP.includes(cleanI.substring(i, i + 3))) return true;
       }
       return false;
     };
@@ -49,32 +63,34 @@ export default function Page() {
       const s2 = String(boxNoStr).replace(/\s/g, '');
       if (s1 === s2) return true;
       
-      const parseRange = (str: string) => {
-        if (str.includes('-') || str.includes('~')) {
-          const parts = str.split(/[-~]/);
-          return { s: parseInt(parts[0], 10), e: parseInt(parts[1], 10) };
-        }
-        const val = parseInt(str.replace(/[^0-9]/g, ''), 10);
-        return { s: val, e: val };
-      };
-
-      if (s2.includes(',')) {
-        const parts = s2.split(',');
-        const pRange = parseRange(s1);
+      const parseRanges = (str: string) => {
+        const ranges: {s: number, e: number}[] = [];
+        // 쉼표로 먼저 분리
+        const parts = str.split(',');
         for (const p of parts) {
-          const bRange = parseRange(p);
-          if (!isNaN(pRange.s) && !isNaN(bRange.s)) {
-            if (pRange.s >= bRange.s && pRange.s <= bRange.e) return true;
+          if (p.includes('-') || p.includes('~')) {
+            const rangeParts = p.split(/[-~]/);
+            const s = parseInt(rangeParts[0].replace(/[^0-9]/g, ''), 10);
+            const e = parseInt(rangeParts[1].replace(/[^0-9]/g, ''), 10);
+            if (!isNaN(s) && !isNaN(e)) ranges.push({ s, e });
+          } else {
+            const val = parseInt(p.replace(/[^0-9]/g, ''), 10);
+            if (!isNaN(val)) ranges.push({ s: val, e: val });
           }
         }
-        return false;
-      }
+        return ranges;
+      };
 
-      const pRange = parseRange(s1);
-      const bRange = parseRange(s2);
+      const pRanges = parseRanges(s1);
+      const bRanges = parseRanges(s2);
 
-      if (!isNaN(pRange.s) && !isNaN(pRange.e) && !isNaN(bRange.s) && !isNaN(bRange.e)) {
-         if (pRange.s >= bRange.s && pRange.s <= bRange.e) return true;
+      for (const pr of pRanges) {
+        for (const br of bRanges) {
+          // pRange의 어느 한 상자라도 bRange 안에 포함되면 매칭으로 간주
+          // 또는 pr(상세 패킹)이 br(인보이스 패킹) 범위 내에 완전히 속하는지
+          if (pr.s >= br.s && pr.s <= br.e) return true;
+          if (pr.e >= br.s && pr.e <= br.e) return true;
+        }
       }
 
       return false;
@@ -109,7 +125,7 @@ export default function Page() {
       let matches = invoiceGrouped.filter(g => pNos.some(pNo => isPackingNoMatch(pNo, g.boxNo)));
       
       if (matches.length === 0) {
-        matches = invoiceGrouped.filter(g => isNameMatch(pItem.matchedName, g.name));
+        matches = invoiceGrouped.filter(g => isNameMatch(pItem.matchedName, g.name) || isNameMatch(pItem.style, g.name));
       }
 
       let unitPrice = 0;
@@ -117,19 +133,31 @@ export default function Page() {
       if (matches.length === 1) {
         unitPrice = matches[0].unitPrice;
       } else if (matches.length > 1) {
-        const nameMatch = matches.filter(g => isNameMatch(pItem.matchedName, g.name));
-        if (nameMatch.length === 1) {
-           unitPrice = nameMatch[0].unitPrice;
-        } else if (nameMatch.length > 1) {
-           unitPrice = nameMatch[0].unitPrice;
+        // 정확한 이름 매칭 시도
+        const exactMatch = matches.find(g => pItem.matchedName === g.name || pItem.style === g.name);
+        if (exactMatch) {
+          unitPrice = exactMatch.unitPrice;
         } else {
-           const groupedMatches: Record<string, any> = {};
-           matches.forEach(m => {
-             if (!groupedMatches[m.name]) groupedMatches[m.name] = { ...m, qty: 0 };
-             groupedMatches[m.name].qty += m.qty;
-           });
-           const exactQtyMatch = Object.values(groupedMatches).find(g => g.qty === pItem.qty);
-           unitPrice = exactQtyMatch ? exactQtyMatch.unitPrice : matches[0].unitPrice;
+          const nameMatch = matches.filter(g => isNameMatch(pItem.matchedName, g.name) || isNameMatch(pItem.style, g.name));
+          if (nameMatch.length === 1) {
+             unitPrice = nameMatch[0].unitPrice;
+          } else if (nameMatch.length > 1) {
+             // 수량이 정확히 일치하는지 먼저 확인
+             const exactQtyMatch = nameMatch.find(g => g.qty === pItem.qty);
+             if (exactQtyMatch) {
+               unitPrice = exactQtyMatch.unitPrice;
+             } else {
+               unitPrice = nameMatch[0].unitPrice;
+             }
+          } else {
+             const groupedMatches: Record<string, any> = {};
+             matches.forEach(m => {
+               if (!groupedMatches[m.name]) groupedMatches[m.name] = { ...m, qty: 0 };
+               groupedMatches[m.name].qty += m.qty;
+             });
+             const exactQtyMatch = Object.values(groupedMatches).find(g => g.qty === pItem.qty);
+             unitPrice = exactQtyMatch ? exactQtyMatch.unitPrice : matches[0].unitPrice;
+          }
         }
       }
 
@@ -167,10 +195,11 @@ export default function Page() {
           if (nameCol === -1) {
             row.forEach((cell, idx) => {
               const cStr = String(cell || "").replace(/\s/g, '');
-              if (cStr === '품명') nameCol = idx;
-              else if (cStr === '총수량' || cStr === '수량') qtyCol = idx;
-              else if (cStr === '신고단가') priceCol = idx;
-              else if (cStr === '박스번호' || cStr === '패킹NO.' || cStr === '패킹번호') boxNoCol = idx;
+              const cUpper = cStr.toUpperCase();
+              if (cStr === '품명' || cUpper.includes('ITEM') || cUpper.includes('PRODUCT')) nameCol = idx;
+              else if (cStr === '총수량' || cStr === '수량' || cUpper.includes('Q\'TY') || cUpper.includes('QTY')) qtyCol = idx;
+              else if (cStr === '신고단가' || cUpper.includes('UNITPRICE') || cStr.includes('단가')) priceCol = idx;
+              else if (cStr === '박스번호' || cStr === '패킹NO.' || cStr === '패킹번호' || cUpper.includes('BOX') || cUpper.includes('C/T') || cUpper.includes('CARTON')) boxNoCol = idx;
             });
             continue;
           }
@@ -231,9 +260,9 @@ export default function Page() {
                       const c = String(cell || "").trim().toUpperCase().replace(/\s/g, '');
                       if (c === '품명' || c === 'ITEM' || c.includes('품명')) nameCol = cellIdx;
                       else if (c === '칼라' || c === '색상' || c.includes('COLOR')) colorCol = cellIdx;
-                      else if (c === '합계' || c === '소계' || c === '총계' || c === '수량' || c === '총수량' || c === 'TOTAL') totalCol = cellIdx;
-                      else if (c.includes('사이즈')) sizeStartCol = cellIdx;
-                      else if (c === '패킹NO.' || c === '박스번호' || c === '패킹번호' || c === '패킹NO') packingNoCol = cellIdx;
+                      else if (c === '합계' || c === '소계' || c === '총계' || c === '수량' || c === '총수량' || c === 'TOTAL' || c.includes('Q\'TY') || c.includes('QTY')) totalCol = cellIdx;
+                      else if (c.includes('사이즈') || c.includes('SIZE')) sizeStartCol = cellIdx;
+                      else if (c === '패킹NO.' || c === '박스번호' || c === '패킹번호' || c === '패킹NO' || c.includes('BOX') || c.includes('C/T') || c.includes('CARTON')) packingNoCol = cellIdx;
                   });
                   
                   let isMatrix = false;

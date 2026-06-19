@@ -2,7 +2,7 @@ import { supabase } from './supabase';
 
 function normalizeStr(s: any) {
     if (!s) return "";
-    return s.toString().replace(/[^0-9A-Z가-힣]/gi, '').toUpperCase();
+    return s.toString().replace(/[^0-9A-Z가-힣\u4E00-\u9FFF]/gi, '').toUpperCase();
 }
 
 export async function matchProducts(rawItems: any[]) {

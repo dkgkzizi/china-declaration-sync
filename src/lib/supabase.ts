@@ -7,7 +7,7 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
 
 function normalizeStr(s: any) {
     if (!s) return "";
-    return s.toString().replace(/[^0-9A-Z가-힣]/gi, '').toUpperCase();
+    return s.toString().replace(/[^0-9A-Z가-힣\u4E00-\u9FFF]/gi, '').toUpperCase();
 }
 
 const COLOR_MAP: Record<string, string[]> = {
@@ -48,7 +48,7 @@ export async function matchItems(rawItems: any[]): Promise<any[]> {
         for (let i = 0; i < uniqueStyles.length; i += 20) {
             const chunk = uniqueStyles.slice(i, i + 20);
             const orQuery = chunk.map(s => {
-                const s1 = s.replace(/[^a-zA-Z0-9가-힣]/g, '');
+                const s1 = s.replace(/[^a-zA-Z0-9가-힣\u4E00-\u9FFF]/g, '');
                 return `상품명.ilike.%${s}%,상품코드.ilike.%${s}%,상품명.ilike.%${s1}%`;
             }).join(',');
 
