@@ -245,6 +245,12 @@ export default function Page() {
             let price = parseFloat(priceStr.replace(/[^0-9.]/g, ''));
             let boxNo = boxNoCol !== -1 ? String(row[boxNoCol] || "").trim() : "";
             
+            // TOTAL 행 등 이름과 단가가 빈칸인 행을 필터링 (머지된 데이터가 아닌 경우)
+            const originalName = String(row[nameCol] || "").trim();
+            if (!originalName && priceStr.trim() === '') {
+              continue;
+            }
+
             if (qty > 0) {
               if (!name && lastName) name = lastName;
               else if (name) lastName = name;
@@ -745,14 +751,14 @@ export default function Page() {
                             <td className="px-5 py-3"><span className="text-base font-black text-slate-700">{item.qty}</span></td>
                             <td className="px-5 py-3">
                               {item.unitPrice > 0 ? (
-                                <span className="text-sm font-bold text-slate-600">${item.unitPrice.toFixed(2)}</span>
+                                <span className="text-sm font-bold text-slate-600">${item.unitPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                               ) : (
                                 <span className="text-xs font-medium text-slate-300">-</span>
                               )}
                             </td>
                             <td className="px-5 py-3">
                               {item.totalPrice > 0 ? (
-                                <span className="text-sm font-black text-slate-800">${item.totalPrice.toFixed(2)}</span>
+                                <span className="text-sm font-black text-slate-800">${item.totalPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                               ) : (
                                 <span className="text-xs font-medium text-slate-300">-</span>
                               )}
@@ -764,7 +770,7 @@ export default function Page() {
                             <td className="px-5 py-4 text-right text-xs font-black text-slate-500 uppercase tracking-widest">TOTAL</td>
                             <td className="px-5 py-4"><span className="text-lg font-black text-slate-800">{totalQty.toLocaleString()}</span></td>
                             <td className="px-5 py-4"></td>
-                            <td className="px-5 py-4"><span className="text-lg font-black text-red-600">${grandTotalPrice.toFixed(2)}</span></td>
+                            <td className="px-5 py-4"><span className="text-lg font-black text-red-600">${grandTotalPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></td>
                           </tr>
                         )}
                       </tbody>
