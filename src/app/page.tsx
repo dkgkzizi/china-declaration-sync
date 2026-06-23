@@ -42,15 +42,11 @@ export default function Page() {
       if (cleanP === cleanI) return true;
       if (cleanP.includes(cleanI) || cleanI.includes(cleanP)) return true;
 
-      // 두 글자 이상 일치하는 형태소(명사 등)가 있는지 확인
-      // 단순히 2글자 연속 매칭은 오탐이 많으므로 3글자 이상이거나 특정 키워드(바지, 가방 등) 포함 여부 체크
-      const keywords = ['바지', '가방', '우비', '박스', '조끼', '팬츠', '치마', '모자', '양말', '신발', '슈즈', '티셔츠', '맨투맨', '원피스', '상하복', '세트', '가디건', '자켓', '점퍼', '코트', '패딩', '레깅스', '타이즈', '니트', '스웨터', '셔츠', '블라우스', '스커트', '수영복', '래쉬가드', '잠옷', '내복', '속옷', '팬티', '런닝', '브라', '마스크', '장갑', '목도리', '스카프', '넥워머', '귀마개', '헤어밴드', '머리띠', '핀', '방울', '끈', '가방', '백팩', '크로스백', '에코백', '파우치', '지갑', '벨트', '안경', '선글라스', '우산', '시계', '주얼리', '악세사리', '기타', '사은품', '포장', '케이스', '캐리어', '반다나', '팔보호대', '앞치마', '앙상블'];
-      
+      const keywords = ['바지', '가방', '우비', '박스', '조끼', '팬츠', '치마', '모자', '양말', '신발', '슈즈', '티셔츠', '맨투맨', '원피스', '상하복', '세트', '가디건', '자켓', '점퍼', '코트', '패딩', '레깅스', '타이즈', '니트', '스웨터', '셔츠', '블라우스', '스커트', '수영복', '래쉬가드', '잠옷', '내복', '속옷', '팬티', '런닝', '브라', '마스크', '장갑', '목도리', '스카프', '넥워머', '귀마개', '헤어밴드', '머리띠', '핀', '방울', '끈', '백팩', '크로스백', '에코백', '파우치', '지갑', '벨트', '안경', '선글라스', '우산', '시계', '주얼리', '악세사리', '기타', '사은품', '포장', '케이스', '캐리어', '반다나', '팔보호대', '앞치마', '앙상블'];
       for (const kw of keywords) {
         if (cleanP.includes(kw) && cleanI.includes(kw)) return true;
       }
 
-      // 그래도 없으면 3글자 이상 연속 매칭 허용 (너무 짧은 2글자 매칭은 제외)
       for (let i = 0; i <= cleanI.length - 3; i++) {
         if (cleanP.includes(cleanI.substring(i, i + 3))) return true;
       }
@@ -59,13 +55,12 @@ export default function Page() {
 
     const isPackingNoMatch = (pNo: string, boxNoStr: string) => {
       if (!pNo || !boxNoStr) return false;
-      const s1 = String(pNo).replace(/\s/g, '');
-      const s2 = String(boxNoStr).replace(/\s/g, '');
+      const s1 = String(pNo).replace(/\\s/g, '');
+      const s2 = String(boxNoStr).replace(/\\s/g, '');
       if (s1 === s2) return true;
       
       const parseRanges = (str: string) => {
         const ranges: {s: number, e: number}[] = [];
-        // 쉼표로 먼저 분리
         const parts = str.split(',');
         for (const p of parts) {
           if (p.includes('-') || p.includes('~')) {
@@ -86,18 +81,15 @@ export default function Page() {
 
       for (const pr of pRanges) {
         for (const br of bRanges) {
-          // pRange의 어느 한 상자라도 bRange 안에 포함되면 매칭으로 간주
-          // 또는 pr(상세 패킹)이 br(인보이스 패킹) 범위 내에 완전히 속하는지
           if (pr.s >= br.s && pr.s <= br.e) return true;
           if (pr.e >= br.s && pr.e <= br.e) return true;
         }
       }
-
       return false;
     };
 
+    // 1. 웹 데이터 그룹화
     const summaryData: Record<string, any> = {};
-
     items.forEach(item => {
       const key = item.style;
       if (!summaryData[key]) {
@@ -105,68 +97,108 @@ export default function Page() {
           style: item.style,
           matchedName: item.matchedName || item.style,
           qty: 0,
-          packingNos: new Set<string>()
+          packingNos: new Set<string>(),
+          unitPrice: 0,
         };
       }
-      if (item.packingNo) {
-        summaryData[key].packingNos.add(item.packingNo);
-      }
+      if (item.packingNo) summaryData[key].packingNos.add(item.packingNo);
       summaryData[key].qty += item.qty;
     });
+    const webItems = Object.values(summaryData);
 
-    const invoiceGrouped: { name: string, qty: number, unitPrice: number, boxNo: string }[] = [];
+    // 2. 엑셀 데이터 품명/단가 기준 그룹화 (1:N 자동 병합)
+    const invMap: Record<string, any> = {};
     invoiceData.forEach(inv => {
-      invoiceGrouped.push({ ...inv });
-    });
-
-    return Object.values(summaryData).map((pItem: any) => {
-      const pNos = Array.from(pItem.packingNos) as string[];
-      
-      let matches = invoiceGrouped.filter(g => pNos.some(pNo => isPackingNoMatch(pNo, g.boxNo)));
-      
-      if (matches.length === 0) {
-        matches = invoiceGrouped.filter(g => isNameMatch(pItem.matchedName, g.name) || isNameMatch(pItem.style, g.name));
+      const key = `${inv.name}_${inv.unitPrice}`;
+      if (!invMap[key]) {
+        invMap[key] = { name: inv.name, qty: 0, unitPrice: inv.unitPrice, boxNos: new Set<string>(), isUsed: false };
       }
+      invMap[key].qty += inv.qty;
+      if (inv.boxNo) invMap[key].boxNos.add(inv.boxNo);
+    });
+    const invItems = Object.values(invMap);
 
-      let unitPrice = 0;
-      
-      if (matches.length === 1) {
-        unitPrice = matches[0].unitPrice;
-      } else if (matches.length > 1) {
-        // 정확한 이름 매칭 시도
-        const exactMatch = matches.find(g => pItem.matchedName === g.name || pItem.style === g.name);
-        if (exactMatch) {
-          unitPrice = exactMatch.unitPrice;
+    // Stage 1: 1:1 수량 매칭
+    webItems.forEach(w => {
+      const candidates = invItems.filter(inv => !inv.isUsed && inv.qty === w.qty);
+      if (candidates.length === 1) {
+        w.unitPrice = candidates[0].unitPrice;
+        candidates[0].isUsed = true;
+      } else if (candidates.length > 1) {
+        const nameMatch = candidates.find(inv => isNameMatch(w.matchedName, inv.name) || isNameMatch(w.style, inv.name));
+        if (nameMatch) {
+          w.unitPrice = nameMatch.unitPrice;
+          nameMatch.isUsed = true;
         } else {
-          const nameMatch = matches.filter(g => isNameMatch(pItem.matchedName, g.name) || isNameMatch(pItem.style, g.name));
-          if (nameMatch.length === 1) {
-             unitPrice = nameMatch[0].unitPrice;
-          } else if (nameMatch.length > 1) {
-             // 수량이 정확히 일치하는지 먼저 확인
-             const exactQtyMatch = nameMatch.find(g => g.qty === pItem.qty);
-             if (exactQtyMatch) {
-               unitPrice = exactQtyMatch.unitPrice;
-             } else {
-               unitPrice = nameMatch[0].unitPrice;
-             }
-          } else {
-             const groupedMatches: Record<string, any> = {};
-             matches.forEach(m => {
-               if (!groupedMatches[m.name]) groupedMatches[m.name] = { ...m, qty: 0 };
-               groupedMatches[m.name].qty += m.qty;
-             });
-             const exactQtyMatch = Object.values(groupedMatches).find(g => g.qty === pItem.qty);
-             unitPrice = exactQtyMatch ? exactQtyMatch.unitPrice : matches[0].unitPrice;
-          }
+          w.unitPrice = candidates[0].unitPrice;
+          candidates[0].isUsed = true;
         }
       }
-
-      return {
-        ...pItem,
-        unitPrice,
-        totalPrice: unitPrice > 0 ? pItem.qty * unitPrice : 0
-      };
     });
+
+    // 백트래킹 Subset Sum 탐색기 (최대 깊이 제한)
+    const findSubset = (target: number, sourceItems: any[], maxDepth: number = 3) => {
+      let result: any[] | null = null;
+      const backtrack = (start: number, currentSum: number, currentSubset: any[]) => {
+        if (result) return;
+        if (currentSum === target) { result = [...currentSubset]; return; }
+        if (currentSum > target || currentSubset.length >= maxDepth) return;
+        for (let i = start; i < sourceItems.length; i++) {
+          backtrack(i + 1, currentSum + sourceItems[i].qty, [...currentSubset, sourceItems[i]]);
+        }
+      };
+      backtrack(0, 0, []);
+      return result;
+    };
+
+    // Stage 2: N:1 수량 매칭 (웹 여러개 = 엑셀 1개)
+    const unmatchedWeb = webItems.filter(w => w.unitPrice === 0);
+    const unmatchedInv = invItems.filter(inv => !inv.isUsed);
+
+    unmatchedInv.forEach(inv => {
+      const subset = findSubset(inv.qty, unmatchedWeb, 4);
+      if (subset) {
+        subset.forEach(s => {
+          s.unitPrice = inv.unitPrice;
+          const idx = unmatchedWeb.findIndex(uw => uw.style === s.style);
+          if (idx > -1) unmatchedWeb.splice(idx, 1);
+        });
+        inv.isUsed = true;
+      }
+    });
+
+    // Stage 3: 1:N 수량 매칭 (웹 1개 = 엑셀 여러개)
+    const stillUnmatchedWeb = unmatchedWeb.filter(w => w.unitPrice === 0);
+    const stillUnmatchedInv = unmatchedInv.filter(inv => !inv.isUsed);
+
+    stillUnmatchedWeb.forEach(w => {
+      const subset = findSubset(w.qty, stillUnmatchedInv, 4);
+      if (subset) {
+        w.unitPrice = subset[0].unitPrice;
+        subset.forEach(s => s.isUsed = true);
+        const idx = stillUnmatchedWeb.findIndex(uw => uw.style === w.style);
+        if (idx > -1) stillUnmatchedWeb.splice(idx, 1);
+      }
+    });
+
+    // Stage 4: 기존 이름/패킹번호 매칭 (Fallback)
+    webItems.filter(w => w.unitPrice === 0).forEach(w => {
+      const pNos = Array.from(w.packingNos) as string[];
+      let matches = invoiceData.filter(g => pNos.some(pNo => isPackingNoMatch(pNo, g.boxNo)));
+      
+      if (matches.length === 0) {
+        matches = invoiceData.filter(g => isNameMatch(w.matchedName, g.name) || isNameMatch(w.style, g.name));
+      }
+
+      if (matches.length > 0) {
+        w.unitPrice = matches[0].unitPrice;
+      }
+    });
+
+    return webItems.map(w => ({
+      ...w,
+      totalPrice: w.unitPrice > 0 ? w.qty * w.unitPrice : 0
+    }));
   }, [items, invoiceData]);
 
   const totalQty = items.reduce((s, r) => s + r.qty, 0);
