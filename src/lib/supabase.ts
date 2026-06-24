@@ -52,10 +52,10 @@ export async function matchItems(rawItems: any[]): Promise<any[]> {
                 return `상품명.ilike.%${s}%,상품코드.ilike.%${s}%,상품명.ilike.%${s1}%`;
             }).join(',');
 
-            const { data: mRows } = await supabase.from('mapping_data').select('상품명, 상품코드, 바코드, 옵션').or(orQuery);
+            const { data: mRows } = await supabase.from('mapping_data').select('*').or(orQuery);
             if (mRows) mappingRows.push(...mRows);
 
-            const { data: pRows } = await supabase.from('products').select('상품명, 상품코드, 바코드, 옵션').or(orQuery);
+            const { data: pRows } = await supabase.from('products').select('*').or(orQuery);
             if (pRows) productRows.push(...pRows);
         }
 
@@ -94,7 +94,7 @@ export async function matchItems(rawItems: any[]): Promise<any[]> {
                 if (dbName === nStyle || dbCode === nStyle || dbBarcode === nStyle) {
                     score += 30; isBaseMatch = true;
                 } else if (dbName.includes(nStyle) || dbCode.includes(nStyle) || dbBarcode.includes(nStyle)) {
-                    score += 10; isBaseMatch = true;
+                    score += 25; isBaseMatch = true; // 부분 일치 점수 상향 (카테고리명 포함 고려)
                 } else {
                     const cleaned = nStyle.replace(/슈즈|신발|샌들|장화|구두/g, '');
                     if (cleaned.length >= 2 && (dbName.includes(cleaned) || dbCode.includes(cleaned))) {
@@ -131,10 +131,22 @@ export async function matchItems(rawItems: any[]): Promise<any[]> {
 
             const isValid = bestMatch && bestScore >= 25;
 
+            let finalMatchedName = style || '코드누락';
+            if (isValid) {
+                const dbProdName = bestMatch['상품명'] || '';
+                const category = bestMatch['카테고리'] || bestMatch['분류'] || bestMatch['대분류'] || bestMatch['category'] || bestMatch['Category'];
+                
+                if (category && !dbProdName.includes(category)) {
+                    finalMatchedName = `${category}-${dbProdName}`;
+                } else {
+                    finalMatchedName = dbProdName;
+                }
+            }
+
             return {
                 ...record,
                 matchedCode: isValid ? bestMatch['상품코드'] : '미매칭',
-                matchedName: isValid ? bestMatch['상품명'] : (style || '코드누락'),
+                matchedName: finalMatchedName,
                 isMatched: !!isValid,
             };
         });
