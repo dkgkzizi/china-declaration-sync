@@ -745,7 +745,10 @@ export default function Page() {
                         ) : pivotItems.map((item, idx) => (
                           <tr key={item.style} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors group">
                             <td className="px-5 py-3">
-                              <div className="inline-block px-1.5 py-0.5 bg-red-50 text-red-400 text-[8px] font-black rounded mb-0.5 uppercase">REF: {item.style}</div>
+                              <div className="inline-block px-1.5 py-0.5 bg-red-50 text-red-400 text-[8px] font-black rounded mb-0.5 uppercase">
+                                REF: {item.style}
+                                {item.error && <span className="text-red-600 ml-1 capitalize normal-case font-bold border-l border-red-200 pl-1 ml-1">{item.error}</span>}
+                              </div>
                               <div className="text-sm font-black text-slate-800 leading-tight">{item.matchedName}</div>
                             </td>
                             <td className="px-5 py-3"><span className="text-base font-black text-slate-700">{item.qty}</span></td>
