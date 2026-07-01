@@ -50,8 +50,8 @@ export async function matchItems(rawItems: any[]): Promise<any[]> {
         for (let i = 0; i < uniqueStyles.length; i += 20) {
             const chunk = uniqueStyles.slice(i, i + 20);
             const orQuery = chunk.map(s => {
-                const cleanS = s.replace(/[^a-zA-Z0-9가-힣\u4E00-\u9FFF]/g, '%');
-                return `상품명.ilike.%${cleanS}%,상품코드.ilike.%${cleanS}%`;
+                const cleanS = s.replace(/[^a-zA-Z0-9가-힣\u4E00-\u9FFF]/g, '*');
+                return `상품명.ilike.*${cleanS}*,상품코드.ilike.*${cleanS}*`;
             }).join(',');
 
             // mapping_data might not exist, ignore errors silently

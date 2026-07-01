@@ -7,8 +7,8 @@ export async function GET(req: NextRequest) {
     if (!query || query.length < 2) return NextResponse.json({ success: true, items: [] });
 
     try {
-        const cleanQ = query.replace(/[^a-zA-Z0-9가-힣\u4E00-\u9FFF]/g, '%');
-        const orQuery = `상품명.ilike.%${cleanQ}%,상품코드.ilike.%${cleanQ}%`;
+        const cleanQ = query.replace(/[^a-zA-Z0-9가-힣\u4E00-\u9FFF]/g, '*');
+        const orQuery = `상품명.ilike.*${cleanQ}*,상품코드.ilike.*${cleanQ}*`;
 
         // mapping_data might not exist, ignore error silently
         const { data } = await supabase
