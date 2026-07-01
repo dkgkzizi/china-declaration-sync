@@ -50,16 +50,16 @@ export async function matchItems(rawItems: any[]): Promise<any[]> {
         for (let i = 0; i < uniqueStyles.length; i += 20) {
             const chunk = uniqueStyles.slice(i, i + 20);
             const orQuery = chunk.map(s => {
-                const safeS = s.replace(/"/g, '""');
-                const s1 = s.replace(/[^a-zA-Z0-9가-힣\u4E00-\u9FFF]/g, '');
-                const safeS1 = s1.replace(/"/g, '""');
-                return `상품명.ilike."%${safeS}%",상품코드.ilike."%${safeS}%",상품명.ilike."%${safeS1}%"`;
+                const cleanS = s.replace(/[^a-zA-Z0-9가-힣\u4E00-\u9FFF]/g, '%');
+                return `상품명.ilike.%${cleanS}%,상품코드.ilike.%${cleanS}%`;
             }).join(',');
 
-            const { data: mRows, error: mErr } = await supabase.from('mapping_data').select('*').or(orQuery);
+            // mapping_data might not exist, ignore errors silently
+            const { data: mRows } = await supabase.from('mapping_data').select('*').or(orQuery);
             if (mRows) mappingRows.push(...mRows);
 
             const { data: pRows, error: pErr } = await supabase.from('products').select('*').or(orQuery);
+            if (pErr) console.warn('products query error:', pErr);
             if (pRows) productRows.push(...pRows);
         }
 
