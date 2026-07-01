@@ -7,23 +7,35 @@ export async function GET(req: NextRequest) {
     if (!query || query.length < 2) return NextResponse.json({ success: true, items: [] });
 
     try {
-        const { data, error } = await supabase
+        const cleanQ = query.replace(/[^a-zA-Z0-9가-힣\u4E00-\u9FFF]/g, '%');
+        const orQuery = `상품명.ilike.%${cleanQ}%,상품코드.ilike.%${cleanQ}%`;
+
+        // mapping_data might not exist, ignore error silently
+        const { data } = await supabase
             .from('mapping_data')
             .select('상품코드, 상품명, 옵션')
-            .or(`상품명.ilike.%${query}%,상품코드.ilike.%${query}%,옵션.ilike.%${query}%`)
+            .or(orQuery)
             .limit(50);
 
-        if (error) throw error;
-
-        // mapping_data에서 못 찾으면 products도 검색
         let items = data || [];
         if (items.length < 5) {
             const { data: productData } = await supabase
                 .from('products')
-                .select('상품코드, 상품명, 옵션')
-                .or(`상품명.ilike.%${query}%,상품코드.ilike.%${query}%`)
+                .select('*')
+                .or(orQuery)
                 .limit(30);
-            items = [...items, ...(productData || [])];
+            
+            if (productData) {
+                const enhancedProducts = productData.map(r => {
+                    const category = r['카테고리'] || r['분류'] || r['대분류'] || r['category'] || r['Category'] || r['상품분류'] || r['상품분류명'] || r['카테고리명'] || r['상품군'] || r['중분류'];
+                    let finalName = r['상품명'];
+                    if (category && !finalName.includes(category)) {
+                        finalName = `${category}-${finalName}`;
+                    }
+                    return { ...r, 상품명: finalName };
+                });
+                items = [...items, ...enhancedProducts];
+            }
         }
 
         return NextResponse.json({
