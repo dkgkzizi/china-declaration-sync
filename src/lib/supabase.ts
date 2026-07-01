@@ -45,17 +45,21 @@ export async function matchItems(rawItems: any[]): Promise<any[]> {
         let mappingRows: any[] = [];
         let productRows: any[] = [];
 
+        let errors: string[] = [];
+
         for (let i = 0; i < uniqueStyles.length; i += 20) {
             const chunk = uniqueStyles.slice(i, i + 20);
             const orQuery = chunk.map(s => {
+                const safeS = s.replace(/"/g, '""');
                 const s1 = s.replace(/[^a-zA-Z0-9가-힣\u4E00-\u9FFF]/g, '');
-                return `상품명.ilike.%${s}%,상품코드.ilike.%${s}%,상품명.ilike.%${s1}%`;
+                const safeS1 = s1.replace(/"/g, '""');
+                return `상품명.ilike."%${safeS}%",상품코드.ilike."%${safeS}%",상품명.ilike."%${safeS1}%"`;
             }).join(',');
 
-            const { data: mRows } = await supabase.from('mapping_data').select('*').or(orQuery);
+            const { data: mRows, error: mErr } = await supabase.from('mapping_data').select('*').or(orQuery);
             if (mRows) mappingRows.push(...mRows);
 
-            const { data: pRows } = await supabase.from('products').select('*').or(orQuery);
+            const { data: pRows, error: pErr } = await supabase.from('products').select('*').or(orQuery);
             if (pRows) productRows.push(...pRows);
         }
 
@@ -134,7 +138,7 @@ export async function matchItems(rawItems: any[]): Promise<any[]> {
             let finalMatchedName = style || '코드누락';
             if (isValid) {
                 const dbProdName = bestMatch['상품명'] || '';
-                const category = bestMatch['카테고리'] || bestMatch['분류'] || bestMatch['대분류'] || bestMatch['category'] || bestMatch['Category'];
+                const category = bestMatch['카테고리'] || bestMatch['분류'] || bestMatch['대분류'] || bestMatch['category'] || bestMatch['Category'] || bestMatch['상품분류'] || bestMatch['상품분류명'] || bestMatch['카테고리명'] || bestMatch['상품군'] || bestMatch['중분류'];
                 
                 if (category && !dbProdName.includes(category)) {
                     finalMatchedName = `${category}-${dbProdName}`;
@@ -148,12 +152,13 @@ export async function matchItems(rawItems: any[]): Promise<any[]> {
                 matchedCode: isValid ? bestMatch['상품코드'] : '미매칭',
                 matchedName: finalMatchedName,
                 isMatched: !!isValid,
+                error: errors.length > 0 ? errors[0] : null
             };
         });
 
         return results;
-    } catch (err) {
+    } catch (err: any) {
         console.error('MATCH_ENGINE_ERROR:', err);
-        return rawItems.map(r => ({ ...r, matchedCode: '엔진오류', matchedName: r.style || r.name, isMatched: false }));
+        return rawItems.map(r => ({ ...r, matchedCode: '엔진오류', matchedName: r.style || r.name, isMatched: false, error: err.message || String(err) }));
     }
 }
