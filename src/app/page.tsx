@@ -520,12 +520,18 @@ export default function Page() {
     }).catch(console.error);
   };
 
-  const handleDownload = async () => {
+    const handleDownload = async () => {
     const wb = new ExcelJS.Workbook();
     
+    // 파일명에서 확장자와 -LCL 제거하여 패킹리스트 이름 추출
+    const packingListName = file?.name ? file.name.replace(/-LCL/i, '').replace(/\.[^/.]+$/, "") : "결과";
+
     // 1. 피벗 테이블 형태의 요약 시트 추가
     const summaryWs = wb.addWorksheet('Sheet1');
     summaryWs.columns = [
+      { header: '패킹리스트', key: 'packingList', width: 20 },
+      { header: '브랜드', key: 'brand', width: 15 },
+      { header: '상품번호', key: 'productNo', width: 15 },
       { header: '행 레이블', key: 'productName', width: 30 },
       { header: '합계 : 수량', key: 'totalQty', width: 15 },
       { header: '신고단가', key: 'unitPrice', width: 15 },
@@ -535,6 +541,9 @@ export default function Page() {
 
     pivotItems.forEach(pItem => {
       const row = summaryWs.addRow({ 
+        packingList: packingListName,
+        brand: '오즈키즈',
+        productNo: null,
         productName: pItem.matchedName, 
         totalQty: pItem.qty,
         unitPrice: pItem.unitPrice > 0 ? pItem.unitPrice : null,
@@ -542,12 +551,15 @@ export default function Page() {
       });
 
       if (pItem.unitPrice > 0) {
-        row.getCell('unitPrice').numFmt = '"$"#,##0.00';
-        row.getCell('totalPrice').numFmt = '"$"#,##0.00';
+        row.getCell('unitPrice').numFmt = '#,##0.00';
+        row.getCell('totalPrice').numFmt = '#,##0.00';
       }
     });
 
     const totalRow = summaryWs.addRow({ 
+      packingList: null,
+      brand: null,
+      productNo: null,
       productName: '총합계', 
       totalQty: totalQty,
       unitPrice: null,
@@ -555,7 +567,7 @@ export default function Page() {
     });
     totalRow.font = { bold: true };
     if (grandTotalPrice > 0) {
-      totalRow.getCell('totalPrice').numFmt = '"$"#,##0.00';
+      totalRow.getCell('totalPrice').numFmt = '#,##0.00';
     }
 
     // 2. 상세 데이터 시트 (신고단가결과)
