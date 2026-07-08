@@ -746,22 +746,36 @@ export default function Page() {
                     <table className="w-full text-left">
                       <thead className="sticky top-0 bg-white/95 backdrop-blur-sm z-10 shadow-sm border-b border-slate-100">
                         <tr>
-                          {['Product Name', 'Total Qty', 'Unit Price', 'Total Price'].map(h => (
+                          {['Product Name', 'Total Qty', 'Unit Price', 'Total Price', 'Valid'].map(h => (
                             <th key={h} className="px-5 py-2.5 text-[8px] font-black text-slate-400 uppercase tracking-widest">{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
                         {pivotItems.length === 0 ? (
-                          <tr><td colSpan={4} className="px-5 py-24 text-center text-slate-300 text-xs font-bold uppercase tracking-widest">좌측에서 패킹리스트 파일을 업로드하세요</td></tr>
+                          <tr><td colSpan={5} className="px-5 py-24 text-center text-slate-300 text-xs font-bold uppercase tracking-widest">좌측에서 패킹리스트 파일을 업로드하세요</td></tr>
                         ) : pivotItems.map((item, idx) => (
                           <tr key={item.style} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors group">
                             <td className="px-5 py-3">
-                              <div className="inline-block px-1.5 py-0.5 bg-red-50 text-red-400 text-[8px] font-black rounded mb-0.5 uppercase">
-                                REF: {item.style}
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <div className="inline-block px-1.5 py-0.5 bg-red-50 text-red-400 text-[8px] font-black rounded uppercase">
+                                  REF: {item.style}
+                                </div>
+                                <button 
+                                  onClick={() => { setEditIdx(idx); setModalOpen(true); }}
+                                  className="text-red-500 hover:text-red-700 transition-colors"
+                                  title="수동 매칭"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
                                 {item.error && <span className="text-red-600 ml-1 capitalize normal-case font-bold border-l border-red-200 pl-1 ml-1">{item.error}</span>}
                               </div>
-                              <div className="text-sm font-black text-slate-800 leading-tight">{item.matchedName}</div>
+                              <div 
+                                className="text-sm font-black text-slate-800 leading-tight cursor-pointer hover:text-red-600 transition-colors"
+                                onClick={() => { setEditIdx(idx); setModalOpen(true); }}
+                              >
+                                {item.matchedName}
+                              </div>
                             </td>
                             <td className="px-5 py-3"><span className="text-base font-black text-slate-700">{item.qty}</span></td>
                             <td className="px-5 py-3">
@@ -778,6 +792,20 @@ export default function Page() {
                                 <span className="text-xs font-medium text-slate-300">-</span>
                               )}
                             </td>
+                            <td className="px-5 py-3">
+                              <div className="flex items-center gap-2 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
+                                <div className="w-8 h-8 rounded-xl bg-red-50 flex items-center justify-center text-red-600 border border-red-100" title="매칭 확인">
+                                  <CheckCircle2 className="w-4 h-4" />
+                                </div>
+                                <button 
+                                  onClick={() => setItems(prev => prev.filter(i => i.style !== item.style))}
+                                  className="w-8 h-8 rounded-xl bg-red-50 hover:bg-red-100 flex items-center justify-center text-red-600 border border-red-100 transition-colors"
+                                  title="목록에서 제외"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
                           </tr>
                         ))}
                         {pivotItems.length > 0 && (
@@ -786,6 +814,7 @@ export default function Page() {
                             <td className="px-5 py-4"><span className="text-lg font-black text-slate-800">{totalQty.toLocaleString()}</span></td>
                             <td className="px-5 py-4"></td>
                             <td className="px-5 py-4"><span className="text-lg font-black text-red-600">${grandTotalPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></td>
+                            <td className="px-5 py-4"></td>
                           </tr>
                         )}
                       </tbody>
