@@ -138,10 +138,18 @@ export async function matchItems(rawItems: any[]): Promise<any[]> {
             let finalMatchedName = style || '코드누락';
             if (isValid) {
                 const dbProdName = bestMatch['상품명'] || '';
-                const category = bestMatch['카테고리'] || bestMatch['분류'] || bestMatch['대분류'] || bestMatch['category'] || bestMatch['Category'] || bestMatch['상품분류'] || bestMatch['상품분류명'] || bestMatch['카테고리명'] || bestMatch['상품군'] || bestMatch['중분류'];
+                const rawCat = bestMatch['카테고리'] || bestMatch['분류'] || bestMatch['대분류'] || bestMatch['category'] || bestMatch['Category'] || bestMatch['상품분류'] || bestMatch['상품분류명'] || bestMatch['카테고리명'] || bestMatch['상품군'] || bestMatch['중분류'];
                 
-                if (category && !dbProdName.includes(category)) {
-                    finalMatchedName = `${category}-${dbProdName}`;
+                if (rawCat) {
+                    const parts = rawCat.split('>');
+                    let cleanCat = parts[parts.length - 1].trim();
+                    cleanCat = cleanCat.replace(/\(.*?\)/g, '').trim();
+                    
+                    if (cleanCat && !dbProdName.includes(cleanCat)) {
+                        finalMatchedName = `${cleanCat}-${dbProdName}`;
+                    } else {
+                        finalMatchedName = dbProdName;
+                    }
                 } else {
                     finalMatchedName = dbProdName;
                 }

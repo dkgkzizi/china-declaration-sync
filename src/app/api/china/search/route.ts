@@ -38,10 +38,17 @@ export async function GET(req: NextRequest) {
             
             if (productData) {
                 const enhancedProducts = productData.map(r => {
-                    const category = r['카테고리'] || r['분류'] || r['대분류'] || r['category'] || r['Category'] || r['상품분류'] || r['상품분류명'] || r['카테고리명'] || r['상품군'] || r['중분류'];
+                    const rawCat = r['카테고리'] || r['분류'] || r['대분류'] || r['category'] || r['Category'] || r['상품분류'] || r['상품분류명'] || r['카테고리명'] || r['상품군'] || r['중분류'];
                     let finalName = r['상품명'];
-                    if (category && !finalName.includes(category)) {
-                        finalName = `${category}-${finalName}`;
+                    
+                    if (rawCat) {
+                        const parts = rawCat.split('>');
+                        let cleanCat = parts[parts.length - 1].trim();
+                        cleanCat = cleanCat.replace(/\(.*?\)/g, '').trim();
+                        
+                        if (cleanCat && !finalName.includes(cleanCat)) {
+                            finalName = `${cleanCat}-${finalName}`;
+                        }
                     }
                     return { ...r, 상품명: finalName };
                 });
