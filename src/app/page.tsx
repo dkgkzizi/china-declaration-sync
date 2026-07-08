@@ -762,7 +762,7 @@ export default function Page() {
                                   REF: {item.style}
                                 </div>
                                 <button 
-                                  onClick={() => { setEditTarget(items.find(i => i.style === item.style) || null); setModalOpen(true); }}
+                                  onClick={() => { setEditTarget(items.find(i => i.style === item.style) || null); setSearchTerm(''); setSearchResults([]); setModalOpen(true); }}
                                   className="text-red-500 hover:text-red-700 transition-colors"
                                   title="수동 매칭"
                                 >
@@ -772,7 +772,7 @@ export default function Page() {
                               </div>
                               <div 
                                 className="text-sm font-black text-slate-800 leading-tight cursor-pointer hover:text-red-600 transition-colors"
-                                onClick={() => { setEditTarget(items.find(i => i.style === item.style) || null); setModalOpen(true); }}
+                                onClick={() => { setEditTarget(items.find(i => i.style === item.style) || null); setSearchTerm(''); setSearchResults([]); setModalOpen(true); }}
                               >
                                 {item.matchedName}
                               </div>

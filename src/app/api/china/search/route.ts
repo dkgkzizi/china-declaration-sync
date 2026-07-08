@@ -1,29 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { Client } from 'pg';
 
 export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const query = searchParams.get('q') || '';
     if (!query || query.length < 2) return NextResponse.json({ success: true, items: [] });
 
+    let client;
     try {
         const cleanQ = query.replace(/[^a-zA-Z0-9가-힣\u4E00-\u9FFF]/g, '%');
-        const orQuery = `상품명.ilike.%${cleanQ}%,상품코드.ilike.%${cleanQ}%`;
+        const connectionString = process.env.DATABASE_URL || 'postgresql://postgres.qsqtoufuwplgmzyvzwvd:openhan1234db@aws-1-ap-northeast-2.pooler.supabase.com:5432/postgres';
+        
+        client = new Client({ connectionString });
+        await client.connect();
 
-        // mapping_data might not exist, ignore error silently
-        const { data } = await supabase
-            .from('mapping_data')
-            .select('상품코드, 상품명, 옵션')
-            .or(orQuery)
-            .limit(50);
+        let items: any[] = [];
+        
+        try {
+            const { rows } = await client.query(`
+                SELECT "상품코드", "상품명", "옵션" 
+                FROM mapping_data 
+                WHERE "상품명" ILIKE $1 OR "상품코드" ILIKE $1 
+                LIMIT 50
+            `, [`%${cleanQ}%`]);
+            items = rows;
+        } catch (e) {
+            // mapping_data might not exist silently ignore
+        }
 
-        let items = data || [];
         if (items.length < 5) {
-            const { data: productData } = await supabase
-                .from('products')
-                .select('*')
-                .or(orQuery)
-                .limit(30);
+            const { rows: productData } = await client.query(`
+                SELECT * 
+                FROM products 
+                WHERE "상품명" ILIKE $1 OR "상품코드" ILIKE $1 
+                LIMIT 30
+            `, [`%${cleanQ}%`]);
             
             if (productData) {
                 const enhancedProducts = productData.map(r => {
@@ -47,6 +58,9 @@ export async function GET(req: NextRequest) {
             }))
         });
     } catch (err: any) {
+        console.error("Search Error:", err);
         return NextResponse.json({ success: false, error: err.message });
+    } finally {
+        if (client) await client.end();
     }
 }
