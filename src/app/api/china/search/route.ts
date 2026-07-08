@@ -46,7 +46,8 @@ export async function GET(req: NextRequest) {
                         let cleanCat = parts[parts.length - 1].trim();
                         cleanCat = cleanCat.replace(/\(.*?\)/g, '').trim();
                         
-                        if (cleanCat && !finalName.includes(cleanCat)) {
+                        const hasCategoryPrefix = /^[가-힣a-zA-Z0-9]+-/.test(finalName) || /^\([가-힣a-zA-Z0-9]+\)[가-힣a-zA-Z0-9]+-/.test(finalName);
+                        if (cleanCat && !hasCategoryPrefix && !finalName.includes(cleanCat)) {
                             finalName = `${cleanCat}-${finalName}`;
                         }
                     }

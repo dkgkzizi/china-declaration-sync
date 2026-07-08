@@ -484,16 +484,35 @@ export default function Page() {
     }
   };
 
+  const latestSearchRef = useRef('');
+
   const handleSearch = async (val: string) => {
     setSearchTerm(val);
-    if (val.length < 2) { setSearchResults([]); return; }
+    latestSearchRef.current = val;
+    
+    if (val.length < 2) { 
+      setSearchResults([]); 
+      return; 
+    }
+
     setSearchLoading(true);
     try {
       const res = await fetch(`/api/china/search?q=${encodeURIComponent(val)}`);
       const data = await res.json();
-      if (data.success) setSearchResults(data.items);
-    } catch (e) { console.error(e); }
-    finally { setSearchLoading(false); }
+      
+      // Only update if this is still the latest search term
+      if (latestSearchRef.current === val) {
+        if (data.success) {
+          setSearchResults(data.items);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      if (latestSearchRef.current === val) {
+        setSearchLoading(false);
+      }
+    }
   };
 
   const selectProduct = async (selected: any) => {

@@ -1,66 +1,69 @@
+import { Client } from 'pg';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://qsqtoufuwplgmzyvzwvd.supabase.co';
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'dummy';
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
-function normalizeStr(s: any) {
-    if (!s) return "";
-    return s.toString().replace(/[^0-9A-Z가-힣\u4E00-\u9FFF]/gi, '').toUpperCase();
-}
-
 const COLOR_MAP: Record<string, string[]> = {
-    'IVORY': ['아이보리', '화이트', '크림'],
-    'WHITE': ['화이트', '아이보리'],
-    'BLACK': ['블랙', '검정'],
-    'PINK': ['핑크', '분홍'],
-    'YELLOW': ['옐로우', '노랑'],
-    'GRAY': ['그레이', '회색', '멜란지'],
-    'BEIGE': ['베이지'],
-    'BLUE': ['블루', '파랑'],
-    'NAVY': ['네이비', '남색'],
-    'RED': ['레드', '빨강'],
-    'GREEN': ['그린', '초록'],
-    'MINT': ['민트'],
-    'PURPLE': ['퍼플', '보라'],
+    "BLACK": ["블랙", "검정", "검은색", "BK", "BLK", "검정색"],
+    "WHITE": ["화이트", "하양", "흰색", "WH", "WHT", "백색", "아이보리", "IVORY"],
+    "RED": ["레드", "빨강", "빨간색", "RD", "빨강색"],
+    "BLUE": ["블루", "파랑", "파란색", "BL", "파랑색", "네이비", "NAVY"],
+    "YELLOW": ["옐로우", "노랑", "노란색", "YE", "YW", "노랑색"],
+    "GREEN": ["그린", "초록", "초록색", "GR", "GN", "녹색"],
+    "PINK": ["핑크", "분홍", "분홍색", "PK", "핫핑크", "연핑크"],
+    "PURPLE": ["퍼플", "보라", "보라색", "PR", "PP"],
+    "BROWN": ["브라운", "갈색", "BR"],
+    "GRAY": ["그레이", "회색", "GY", "GRY"],
+    "ORANGE": ["오렌지", "주황", "주황색", "OR"],
+    "BEIGE": ["베이지", "BE"]
 };
 
-export async function matchItems(rawItems: any[]): Promise<any[]> {
+function normalizeStr(s: string): string {
+    if (!s) return '';
+    return s.toString().replace(/[\s\-_\[\]\(\)]/g, '').toLowerCase();
+}
+
+export async function matchItems(rawItems: any[]) {
+    if (!rawItems || rawItems.length === 0) return [];
+
+    let pgClient;
     try {
-        const uniqueStyles = Array.from(new Set(
-            rawItems.map(r => r.style || r.name).filter(s => s && s.length >= 2)
-        ));
+        const connectionString = process.env.DATABASE_URL || 'postgresql://postgres.qsqtoufuwplgmzyvzwvd:openhan1234db@aws-1-ap-northeast-2.pooler.supabase.com:5432/postgres';
+        pgClient = new Client({ connectionString });
+        await pgClient.connect();
 
-        if (uniqueStyles.length === 0) {
-            return rawItems.map(r => ({ ...r, matchedCode: '미매칭', matchedName: r.style || r.name, isMatched: false }));
-        }
-
-        // 1. matching_history 조회
-        const { data: historyRows } = await supabase
-            .from('matching_history')
-            .select('original_style, product_code, matched_name, color, size')
-            .in('original_style', uniqueStyles);
-
+        const uniqueStyles = Array.from(new Set(rawItems.map(item => item.style || item.name).filter(Boolean)));
+        
         let mappingRows: any[] = [];
         let productRows: any[] = [];
+        let historyRows: any[] = [];
 
-        let errors: string[] = [];
+        try {
+            const { rows } = await pgClient.query('SELECT * FROM matching_history ORDER BY created_at DESC LIMIT 1000');
+            historyRows = rows;
+        } catch(e) {}
 
         for (let i = 0; i < uniqueStyles.length; i += 20) {
             const chunk = uniqueStyles.slice(i, i + 20);
-            const orQuery = chunk.map(s => {
-                const cleanS = s.replace(/[^a-zA-Z0-9가-힣\u4E00-\u9FFF]/g, '%');
-                return `상품명.ilike.%${cleanS}%,상품코드.ilike.%${cleanS}%`;
-            }).join(',');
+            
+            const conditions = chunk.map(s => {
+                const cleanS = s.toString().replace(/[^a-zA-Z0-9가-힣\u4E00-\u9FFF]/g, '%');
+                return `"상품명" ILIKE '%${cleanS}%' OR "상품코드" ILIKE '%${cleanS}%'`;
+            }).join(' OR ');
 
-            // mapping_data might not exist, ignore errors silently
-            const { data: mRows } = await supabase.from('mapping_data').select('*').or(orQuery);
-            if (mRows) mappingRows.push(...mRows);
+            if (conditions) {
+                try {
+                    const { rows: mRows } = await pgClient.query(`SELECT * FROM mapping_data WHERE ${conditions}`);
+                    if (mRows) mappingRows.push(...mRows);
+                } catch(e) {}
 
-            const { data: pRows, error: pErr } = await supabase.from('products').select('*').or(orQuery);
-            if (pErr) console.warn('products query error:', pErr);
-            if (pRows) productRows.push(...pRows);
+                try {
+                    const { rows: pRows } = await pgClient.query(`SELECT * FROM products WHERE ${conditions}`);
+                    if (pRows) productRows.push(...pRows);
+                } catch(e) {}
+            }
         }
 
         const dbRows = [...mappingRows, ...productRows];
@@ -145,7 +148,8 @@ export async function matchItems(rawItems: any[]): Promise<any[]> {
                     let cleanCat = parts[parts.length - 1].trim();
                     cleanCat = cleanCat.replace(/\(.*?\)/g, '').trim();
                     
-                    if (cleanCat && !dbProdName.includes(cleanCat)) {
+                    const hasCategoryPrefix = /^[가-힣a-zA-Z0-9]+-/.test(dbProdName) || /^\([가-힣a-zA-Z0-9]+\)[가-힣a-zA-Z0-9]+-/.test(dbProdName);
+                    if (cleanCat && !hasCategoryPrefix && !dbProdName.includes(cleanCat)) {
                         finalMatchedName = `${cleanCat}-${dbProdName}`;
                     } else {
                         finalMatchedName = dbProdName;
