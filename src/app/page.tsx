@@ -28,7 +28,7 @@ export default function Page() {
 
   // 수동 매칭 모달
   const [modalOpen, setModalOpen] = useState(false);
-  const [editIdx, setEditIdx] = useState<number | null>(null);
+  const [editTarget, setEditTarget] = useState<MatchedItem | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -497,8 +497,8 @@ export default function Page() {
   };
 
   const selectProduct = async (selected: any) => {
-    if (editIdx === null) return;
-    const targetStyle = items[editIdx].style;
+    if (!editTarget) return;
+    const targetStyle = editTarget.style;
     const updated = items.map((item, idx) => {
       if (item.style !== targetStyle) return item;
       return { ...item, matchedCode: selected.productCode, matchedName: selected.matchedName, isMatched: true };
@@ -514,8 +514,8 @@ export default function Page() {
         originalStyle: targetStyle,
         matchedName: selected.matchedName,
         productCode: selected.productCode,
-        color: items[editIdx].color,
-        size: items[editIdx].size
+        color: editTarget.color,
+        size: editTarget.size
       })
     }).catch(console.error);
   };
@@ -762,7 +762,7 @@ export default function Page() {
                                   REF: {item.style}
                                 </div>
                                 <button 
-                                  onClick={() => { setEditIdx(idx); setModalOpen(true); }}
+                                  onClick={() => { setEditTarget(items.find(i => i.style === item.style) || null); setModalOpen(true); }}
                                   className="text-red-500 hover:text-red-700 transition-colors"
                                   title="수동 매칭"
                                 >
@@ -772,7 +772,7 @@ export default function Page() {
                               </div>
                               <div 
                                 className="text-sm font-black text-slate-800 leading-tight cursor-pointer hover:text-red-600 transition-colors"
-                                onClick={() => { setEditIdx(idx); setModalOpen(true); }}
+                                onClick={() => { setEditTarget(items.find(i => i.style === item.style) || null); setModalOpen(true); }}
                               >
                                 {item.matchedName}
                               </div>
@@ -835,7 +835,7 @@ export default function Page() {
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">수동 상품 매칭</h3>
-                {editIdx !== null && <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">REF: {items[editIdx]?.style}</p>}
+                {editTarget && <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">REF: {editTarget.style}</p>}
               </div>
               <button onClick={() => setModalOpen(false)} className="w-10 h-10 rounded-2xl bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors">
                 <X className="w-5 h-5" />
